@@ -9,6 +9,7 @@ from workflows.handlers import (
     HANDLER_REGISTRY,
 )
 from workflows.store import Store
+from workflows.loader import load_workflows_from_file, collect_workflows
 
 __all__ = [
     'workflow', 'DurableGenerator',
@@ -18,4 +19,5 @@ __all__ = [
     'WaitHandler', 'WaitAllHandler', 'WaitAnyHandler', 'SleepHandler',
     'HANDLER_REGISTRY',
     'Store',
+    'load_workflows_from_file', 'collect_workflows',
 ]

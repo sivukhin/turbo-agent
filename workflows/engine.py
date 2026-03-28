@@ -84,6 +84,7 @@ class ExecutionState:
     workflows: dict[str, WorkflowState]
     handlers: dict[str, HandlerState]  # key = waiting workflow_id
     root_workflow_id: str
+    source_file: str | None = None
     finished: bool = False
 
 
@@ -101,7 +102,7 @@ class Engine:
     def __init__(self, registry: dict):
         self.registry = registry
 
-    def start(self, store, workflow_name, args, now=None) -> str:
+    def start(self, store, workflow_name, args, now=None, source_file=None) -> str:
         now = now if now is not None else time.time()
         execution_id = _uuid()
         root_workflow_id = _uuid()
@@ -109,6 +110,7 @@ class Engine:
             workflows={root_workflow_id: WorkflowState(name=workflow_name, args=list(args))},
             handlers={},
             root_workflow_id=root_workflow_id,
+            source_file=source_file,
         )
         store.save_state(execution_id, state)
         self._tick_and_process(store, execution_id, now)

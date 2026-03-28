@@ -7,66 +7,35 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from workflows import workflow, wait, wait_all, wait_any, sleep, Engine, Store
+from workflows import Engine, Store, load_workflows_from_file
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'executions.db')
 console = Console()
 
 
-# ---- example workflows ----
-
-@workflow
-def accumulator(n):
-    total = 0
-    for i in range(n):
-        for s in range(n):
-            yield total
-            total = total + i + s
-    yield total
-    return total
+def _parse_target(target: str) -> tuple[str, str]:
+    """Parse 'file.py:function' into (file_path, function_name)."""
+    if ':' not in target:
+        console.print(f'[red]Invalid target:[/] {target}')
+        console.print('Expected format: [bold]path/to/file.py:workflow_name[/]')
+        sys.exit(1)
+    file_path, func_name = target.rsplit(':', 1)
+    return file_path, func_name
 
 
-@workflow
-def double_accumulate(n):
-    a = accumulator(n)
-    b = accumulator(n)
-    yield 'both started'
-    first, second = yield wait_all([a, b])
-    yield f'results: {first}, {second}'
-    return first + second
+def _load_registry(file_path: str) -> dict:
+    return load_workflows_from_file(file_path)
 
 
-@workflow
-def race(n):
-    children = [accumulator(i + 1) for i in range(n)]
-    yield f'racing {n} children'
-    results = yield wait_any(children)
-    finished = [(i, r) for i, (done, r) in enumerate(results) if done]
-    yield f'finished: {finished}'
-    return results
-
-
-@workflow
-def pipeline(steps):
-    children = []
-    for i in range(steps):
-        children.append(accumulator(i + 1))
-    yield f'launched {steps} children'
-    results = []
-    for i, child in enumerate(children):
-        result = yield wait(child)
-        results.append(result)
-        yield f'stage {i} done: {result}'
-    return sum(results)
-
-
-WORKFLOWS = {
-    'accumulator': accumulator,
-    'double_accumulate': double_accumulate,
-    'race': race,
-    'pipeline': pipeline,
-}
+def _load_registry_for_execution(store, execution_id):
+    """Load the registry from the file stored in execution metadata."""
+    state, _ = store.load_state(execution_id)
+    file_path = state.source_file
+    if not file_path:
+        console.print(f'[red]Execution {execution_id} has no source file[/]')
+        sys.exit(1)
+    return load_workflows_from_file(file_path), state
 
 
 def _status_style(status):
@@ -78,18 +47,18 @@ def _category_style(category):
 
 
 def cmd_start(args):
-    wf_name = args.workflow
-    if wf_name not in WORKFLOWS:
+    file_path, wf_name = _parse_target(args.target)
+    registry = _load_registry(file_path)
+    if wf_name not in registry:
         console.print(f'[red]Unknown workflow:[/] {wf_name}')
-        console.print(f'Available: {", ".join(WORKFLOWS)}')
+        console.print(f'Available in {file_path}: {", ".join(registry)}')
         sys.exit(1)
 
     parsed_args = [json.loads(a) for a in args.args]
     store = Store(DB_PATH)
-    engine = Engine(WORKFLOWS)
-    execution_id = engine.start(store, wf_name, parsed_args)
+    engine = Engine(registry)
+    execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path)
 
-    state, _ = store.load_state(execution_id)
     outbox = store.read_outbox(execution_id)
     store.close()
 
@@ -100,7 +69,7 @@ def cmd_start(args):
 
 def cmd_step(args):
     store = Store(DB_PATH)
-    state, _ = store.load_state(args.id)
+    registry, state = _load_registry_for_execution(store, args.id)
     if state.finished:
         store.close()
         console.print(f'[yellow]Execution {args.id} already finished[/]')
@@ -109,7 +78,7 @@ def cmd_step(args):
     outbox_before = store.read_outbox(args.id)
     last_before = outbox_before[-1].event_id if outbox_before else 0
 
-    engine = Engine(WORKFLOWS)
+    engine = Engine(registry)
     try:
         engine.step(store, args.id)
     except Exception as e:
@@ -141,6 +110,7 @@ def cmd_status(args):
     store.close()
 
     console.print(f'[bold]Execution[/] [cyan]{args.id}[/]')
+    console.print(f'  source:       [dim]{state.source_file}[/]')
     finished_text = '[green]yes[/]' if state.finished else '[yellow]no[/]'
     console.print(f'  finished:     {finished_text}')
     console.print(f'  last_event:   {last_event}')
@@ -199,9 +169,7 @@ def _format_payload(event_type, payload):
         return repr(payload.get('value', ''))
     if event_type == 'workflow_finished':
         return f'result={payload.get("result")!r}'
-    if event_type == 'tick':
-        return ''
-    return repr(payload)
+    return repr(payload) if payload else ''
 
 
 def cmd_list(args):
@@ -236,7 +204,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
 
     p_start = sub.add_parser('start', help='Start a new workflow execution')
-    p_start.add_argument('workflow', help='Workflow name')
+    p_start.add_argument('target', help='file.py:workflow_name')
     p_start.add_argument('args', nargs='*', help='JSON-encoded arguments')
 
     p_step = sub.add_parser('step', help='Advance all active workflows one tick')
@@ -245,7 +213,7 @@ def main():
     p_status = sub.add_parser('status', help='Show execution status')
     p_status.add_argument('id', help='Execution ID')
 
-    p_events = sub.add_parser('events', help='Show inbox/outbox events for an execution')
+    p_events = sub.add_parser('events', help='Show inbox/outbox events')
     p_events.add_argument('id', help='Execution ID')
 
     sub.add_parser('list', help='List all executions')

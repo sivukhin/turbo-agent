@@ -51,9 +51,8 @@ class TestStoreBasic:
     def test_save_and_load(self, env):
         engine, store = env
         eid = engine.start(store, 'counter', [5])
-        state, last_event = store.load_state(eid)
+        state, _ = store.load_state(eid)
         assert not state.finished
-        assert last_event > 0
 
     def test_load_nonexistent(self, env):
         _, store = env

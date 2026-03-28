@@ -90,10 +90,12 @@ class ExecutionState:
 # ---- engine ----
 
 class Engine:
-    """Event-sourced workflow engine. All state transitions are driven by events.
+    """Event-sourced workflow engine.
 
-    Pass `now` to start/step/process to control time (for sleep support and testing).
-    If omitted, uses time.time().
+    step() ticks all running workflows, writes events, then processes
+    any new inbox events (workflow_finished) which may unblock handlers.
+
+    Pass `now` to control time (for sleep support and testing).
     """
 
     def __init__(self, registry: dict):
@@ -109,25 +111,41 @@ class Engine:
             root_workflow_id=root_workflow_id,
         )
         store.save_state(execution_id, state)
-        store.append_event(execution_id, None, 'inbox', 'tick', {})
-        self.process(store, execution_id, now=now)
+        self._tick_and_process(store, execution_id, now)
         return execution_id
 
     def step(self, store, execution_id, now=None):
         now = now if now is not None else time.time()
-        store.append_event(execution_id, None, 'inbox', 'tick', {})
-        self.process(store, execution_id, now=now)
+        self._tick_and_process(store, execution_id, now)
 
-    def process(self, store, execution_id, now=None):
-        now = now if now is not None else time.time()
+    def _tick_and_process(self, store, execution_id, now):
+        """Tick running workflows, then process inbox events until stable."""
+        state, last_processed = store.load_state(execution_id)
+
+        # Tick all running workflows
+        new_events = self._handle_tick(state, execution_id, now)
+
+        # Try to resolve handlers (sleep timers, etc.)
+        self._try_resolve_handlers(state, now)
+        self._check_finished(state)
+
+        # Write events and save state
+        store.save_state(execution_id, state, last_processed_event_id=last_processed)
+        for e in new_events:
+            store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
+
+        # Process any new inbox events (workflow_finished may trigger handlers)
+        self._process_inbox(store, execution_id, now)
+
+    def _process_inbox(self, store, execution_id, now):
+        """Process inbox events until no new ones remain."""
         while True:
             state, last_processed = store.load_state(execution_id)
             events = store.read_inbox(execution_id, after_event_id=last_processed)
             if not events:
                 break
 
-            new_events = []
-
+            # Feed events to handlers
             for event in events:
                 for handler_wf_id, hs in list(state.handlers.items()):
                     handler_cls = HANDLER_REGISTRY[hs.handler_type]
@@ -135,29 +153,38 @@ class Engine:
                         event.type, event.workflow_id, event.payload, hs.state,
                     )
 
-                if event.type == 'tick':
-                    tick_events = self._handle_tick(state, execution_id, now)
-                    new_events.extend(tick_events)
-
-            # Try to resolve all handlers
-            for handler_wf_id in list(state.handlers):
-                hs = state.handlers[handler_wf_id]
-                handler_cls = HANDLER_REGISTRY[hs.handler_type]
-                resolved, result = handler_cls.try_resolve(hs.state, now)
-                if resolved:
-                    wf = state.workflows[handler_wf_id]
-                    wf.status = 'running'
-                    wf.send_val = result
-                    del state.handlers[handler_wf_id]
-
-            root = state.workflows[state.root_workflow_id]
-            if root.status == 'finished':
-                state.finished = True
+            # Try to resolve handlers
+            self._try_resolve_handlers(state, now)
+            self._check_finished(state)
 
             last_event_id = events[-1].event_id
             store.save_state(execution_id, state, last_processed_event_id=last_event_id)
-            for e in new_events:
-                store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
+
+            # If any workflows became running, tick them
+            has_running = any(wf.status == 'running' for wf in state.workflows.values())
+            if has_running:
+                new_events = self._handle_tick(state, execution_id, now)
+                self._try_resolve_handlers(state, now)
+                self._check_finished(state)
+                store.save_state(execution_id, state, last_processed_event_id=last_event_id)
+                for e in new_events:
+                    store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
+
+    def _try_resolve_handlers(self, state, now):
+        for handler_wf_id in list(state.handlers):
+            hs = state.handlers[handler_wf_id]
+            handler_cls = HANDLER_REGISTRY[hs.handler_type]
+            resolved, result = handler_cls.try_resolve(hs.state, now)
+            if resolved:
+                wf = state.workflows[handler_wf_id]
+                wf.status = 'running'
+                wf.send_val = result
+                del state.handlers[handler_wf_id]
+
+    def _check_finished(self, state):
+        root = state.workflows[state.root_workflow_id]
+        if root.status == 'finished':
+            state.finished = True
 
     def _handle_tick(self, state, execution_id, now):
         new_events = []

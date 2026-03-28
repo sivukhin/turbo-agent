@@ -395,15 +395,12 @@ class TestConcurrency:
 
 
 class TestEventLog:
-    def test_messages_are_appended(self, env):
+    def test_events_are_appended(self, env):
         engine, store = env
         eid = engine.start(store, 'counter', [3])
         engine.step(store, eid)
         engine.step(store, eid)
-        # Should have inbox + outbox messages
-        inbox = store.read_inbox(eid)
         outbox = store.read_outbox(eid)
-        assert len(inbox) >= 3  # at least 3 ticks
         assert len(outbox) >= 3  # at least 3 yields
 
     def test_outbox_records_yields(self, env):

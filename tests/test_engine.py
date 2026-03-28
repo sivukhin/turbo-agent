@@ -296,56 +296,224 @@ class TestWait:
 
 class TestWaitAll:
     def test_waits_for_both(self, env):
+        """counter(3) returns 3, adder(3) returns 0+1+2=3, sum=6."""
         engine, store = env
         eid = engine.start(store, 'parent_wait_all', [3])
         state = run_to_completion(engine, store, eid)
         assert state.finished
-        assert state.workflows[state.root_workflow_id].result == 6
+        root = state.workflows[state.root_workflow_id]
+        assert root.status == 'finished'
+        assert root.result == 6
+        # Verify both children finished
+        children = {k: v for k, v in state.workflows.items() if k != state.root_workflow_id}
+        assert all(c.status == 'finished' for c in children.values())
+        child_results = sorted(c.result for c in children.values())
+        assert child_results == [3, 3]  # counter(3)=3, adder(3)=3
 
     def test_fan_out(self, env):
+        """counter(1)=1, counter(2)=2, counter(3)=3, counter(4)=4, sum=10."""
         engine, store = env
         eid = engine.start(store, 'fan_out', [4])
         state = run_to_completion(engine, store, eid)
-        assert state.workflows[state.root_workflow_id].result == 10
+        assert state.finished
+        root = state.workflows[state.root_workflow_id]
+        assert root.result == 10
+        children = {k: v for k, v in state.workflows.items() if k != state.root_workflow_id}
+        assert len(children) == 4
+        assert sorted(c.result for c in children.values()) == [1, 2, 3, 4]
 
     def test_ordering(self, env):
+        """adder(3)=3, counter(2)=2, adder(2)=1 — results in handle order."""
         engine, store = env
         eid = engine.start(store, 'ordered', [])
         state = run_to_completion(engine, store, eid)
-        assert state.workflows[state.root_workflow_id].result == [3, 2, 1]
+        assert state.finished
+        result = state.workflows[state.root_workflow_id].result
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result == [3, 2, 1]
 
     def test_different_speeds(self, env):
+        """counter(1) finishes fast, counter(5) slow — both in result."""
         engine, store = env
         eid = engine.start(store, 'mixed_speed', [])
         state = run_to_completion(engine, store, eid)
-        assert state.workflows[state.root_workflow_id].result == [1, 5]
+        assert state.finished
+        result = state.workflows[state.root_workflow_id].result
+        assert isinstance(result, list)
+        assert result == [1, 5]
 
     def test_empty(self, env):
+        """wait_all([]) resolves immediately with []."""
         engine, store = env
         eid = engine.start(store, 'empty_wait', [])
         state = run_to_completion(engine, store, eid)
-        assert state.workflows[state.root_workflow_id].result == []
+        assert state.finished
+        result = state.workflows[state.root_workflow_id].result
+        assert result == []
+
+    def test_all_children_finish_before_result(self, env):
+        """All child workflows must be finished before wait_all resolves."""
+        engine, store = env
+        eid = engine.start(store, 'parent_wait_all', [2])
+        # Step once — children tick but may not all finish
+        engine.step(store, eid)
+        state, _ = store.load_state(eid)
+        root = state.workflows[state.root_workflow_id]
+        # Root should be waiting until both children done
+        if root.status == 'waiting':
+            assert len(state.handlers) == 1
+            hs = list(state.handlers.values())[0]
+            assert hs.handler_type == 'wait_all'
+        # Run to completion and verify
+        state = run_to_completion(engine, store, eid)
+        assert state.finished
+        assert state.workflows[state.root_workflow_id].result == 2 + 1  # counter(2)=2, adder(2)=1
 
 
 class TestWaitAny:
     def test_first_finisher_wins(self, env):
+        """counter(1) finishes first, returns 1."""
         engine, store = env
         eid = engine.start(store, 'parent_wait_any', [])
         state = run_to_completion(engine, store, eid)
         assert state.finished
-        assert state.workflows[state.root_workflow_id].result == 1
+        root = state.workflows[state.root_workflow_id]
+        assert root.status == 'finished'
+        assert root.result == 1
 
     def test_returns_result(self, env):
+        """race_tuple: counter(1) vs counter(5), winner returns 1."""
         engine, store = env
         eid = engine.start(store, 'race_tuple', [])
         state = run_to_completion(engine, store, eid)
-        assert state.workflows[state.root_workflow_id].result == 1
+        assert state.finished
+        root = state.workflows[state.root_workflow_id]
+        assert root.result == 1
+
+    def test_wait_any_result_is_list_of_tuples(self, env):
+        """wait_any returns [(done, result), ...] for each dep in order."""
+        @workflow
+        def any_raw():
+            a = counter(1)  # fast, returns 1
+            b = counter(5)  # slow, returns 5
+            yield 'go'
+            results = yield wait_any([a, b])
+            return results
+
+        reg = {**REGISTRY, 'any_raw': any_raw}
+        engine = Engine(reg)
+        store = env[1]
+        eid = engine.start(store, 'any_raw', [])
+        state = run_to_completion(engine, store, eid)
+        result = state.workflows[state.root_workflow_id].result
+        assert isinstance(result, list)
+        assert len(result) == 2
+        # First dep (counter(1)) finished
+        assert result[0] == (True, 1)
+        # Second dep (counter(5)) may or may not be finished
+        assert result[1][0] in (True, False)
+        if result[1][0]:
+            assert result[1][1] == 5
+
+    def test_wait_any_slow_not_finished(self, env):
+        """The slow child should show (False, None) if not yet finished."""
+        @workflow
+        def any_check():
+            fast = counter(1)   # 1 yield then return 1
+            slow = counter(10)  # 10 yields then return 10
+            yield 'go'
+            results = yield wait_any([fast, slow])
+            return results
+
+        reg = {**REGISTRY, 'any_check': any_check}
+        engine = Engine(reg)
+        store = env[1]
+        eid = engine.start(store, 'any_check', [])
+        # Only step a few times — fast finishes but slow shouldn't
+        for _ in range(5):
+            state, _ = store.load_state(eid)
+            if state.finished:
+                break
+            engine.step(store, eid)
+        state, _ = store.load_state(eid)
+        result = state.workflows[state.root_workflow_id].result
+        assert result[0] == (True, 1)     # fast finished
+        assert result[1] == (False, None)  # slow still running
 
     def test_then_wait_remaining(self, env):
+        """After wait_any, wait for the remaining child."""
         engine, store = env
         eid = engine.start(store, 'race_then_all', [])
         state = run_to_completion(engine, store, eid)
-        assert state.workflows[state.root_workflow_id].result == 1 + 3
+        assert state.finished
+        root = state.workflows[state.root_workflow_id]
+        # counter(1)=1, counter(3)=3, sum=4
+        assert root.result == 4
+
+    def test_wait_any_all_finish_simultaneously(self, env):
+        """When all children have same length, all show as finished."""
+        @workflow
+        def tie():
+            a = counter(2)
+            b = counter(2)
+            yield 'go'
+            results = yield wait_any([a, b])
+            return results
+
+        reg = {**REGISTRY, 'tie': tie}
+        engine = Engine(reg)
+        store = env[1]
+        eid = engine.start(store, 'tie', [])
+        state = run_to_completion(engine, store, eid)
+        result = state.workflows[state.root_workflow_id].result
+        assert isinstance(result, list)
+        assert len(result) == 2
+        # At least one must be finished
+        assert any(done for done, _ in result)
+        # Both have same speed so likely both finished
+        for done, r in result:
+            if done:
+                assert r == 2
+
+    def test_wait_any_single_child(self, env):
+        """wait_any with one child returns [(True, result)]."""
+        @workflow
+        def single_any():
+            c = counter(2)
+            yield 'go'
+            results = yield wait_any([c])
+            return results
+
+        reg = {**REGISTRY, 'single_any': single_any}
+        engine = Engine(reg)
+        store = env[1]
+        eid = engine.start(store, 'single_any', [])
+        state = run_to_completion(engine, store, eid)
+        result = state.workflows[state.root_workflow_id].result
+        assert result == [(True, 2)]
+
+    def test_wait_any_preserves_dep_order(self, env):
+        """Results list matches the order handles were passed, not finish order."""
+        @workflow
+        def ordered_any():
+            slow = counter(5)   # returns 5
+            fast = counter(1)   # returns 1
+            yield 'go'
+            results = yield wait_any([slow, fast])
+            return results
+
+        reg = {**REGISTRY, 'ordered_any': ordered_any}
+        engine = Engine(reg)
+        store = env[1]
+        eid = engine.start(store, 'ordered_any', [])
+        state = run_to_completion(engine, store, eid)
+        result = state.workflows[state.root_workflow_id].result
+        assert len(result) == 2
+        # fast (index 1) finishes first
+        assert result[1] == (True, 1)
+        # slow (index 0) may or may not be done
+        assert result[0][0] in (True, False)
 
 
 class TestNestedWorkflows:

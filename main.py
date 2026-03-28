@@ -6,6 +6,7 @@ import sys
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
 from workflows import Engine, Store, load_workflows_from_file
 
@@ -109,25 +110,33 @@ def cmd_status(args):
     state, last_event = store.load_state(args.id)
     store.close()
 
-    console.print(f'[bold]Execution[/] [cyan]{args.id}[/]')
-    console.print(f'  source:       [dim]{state.source_file}[/]')
     finished_text = '[green]yes[/]' if state.finished else '[yellow]no[/]'
-    console.print(f'  finished:     {finished_text}')
-    console.print(f'  last_event:   {last_event}')
+    root_tree = Tree(
+        f'[bold]Execution[/] [cyan]{args.id}[/]  '
+        f'finished={finished_text}  [dim]{state.source_file}[/]'
+    )
 
-    console.print(f'  [bold]workflows[/] ({len(state.workflows)}):')
-    for wf_id, wf in sorted(state.workflows.items()):
+    children_of = {}
+    for wf_id, wf in state.workflows.items():
+        children_of.setdefault(wf.parent_workflow_id, []).append(wf_id)
+
+    def _render(tree_node, wf_id):
+        wf = state.workflows[wf_id]
         style = _status_style(wf.status)
-        root = ' [bold][root][/]' if wf_id == state.root_workflow_id else ''
+        root_tag = ' [bold cyan][root][/]' if wf_id == state.root_workflow_id else ''
         extra = ''
         if wf.status == 'finished':
-            extra = f' result={wf.result!r}'
-        console.print(f'    [dim]{wf_id}[/] {wf.name}{root}  [{style}]{wf.status}[/]{extra}')
+            extra = f'  result={wf.result!r}'
+        if wf_id in state.handlers:
+            extra += f'  [yellow]({state.handlers[wf_id].handler_type})[/]'
+        node = tree_node.add(
+            f'[bold]{wf.name}[/]{root_tag}  [dim]{wf_id[:8]}[/]  [{style}]{wf.status}[/]{extra}'
+        )
+        for child_id in children_of.get(wf_id, []):
+            _render(node, child_id)
 
-    if state.handlers:
-        console.print(f'  [bold]handlers[/] ({len(state.handlers)}):')
-        for wf_id, hs in state.handlers.items():
-            console.print(f'    [dim]{wf_id}[/] [yellow]{hs.handler_type}[/]  {hs.state}')
+    _render(root_tree, state.root_workflow_id)
+    console.print(root_tree)
 
 
 def cmd_events(args):
@@ -177,42 +186,69 @@ def cmd_inspect(args):
     state, last_event = store.load_state(args.id)
     store.close()
 
-    console.print(f'[bold]Execution[/] [cyan]{args.id}[/]')
-    console.print(f'  source:       [dim]{state.source_file}[/]')
     finished_text = '[green]yes[/]' if state.finished else '[yellow]no[/]'
-    console.print(f'  finished:     {finished_text}')
-    console.print(f'  last_event:   {last_event}')
-    console.print()
+    root_tree = Tree(
+        f'[bold]Execution[/] [cyan]{args.id}[/]  '
+        f'finished={finished_text}  last_event={last_event}  '
+        f'[dim]{state.source_file}[/]'
+    )
 
-    for wf_id, wf in sorted(state.workflows.items()):
+    # Build parent→children map
+    children_of = {}
+    for wf_id, wf in state.workflows.items():
+        parent = wf.parent_workflow_id
+        children_of.setdefault(parent, []).append(wf_id)
+
+    # Render tree recursively
+    def _render_wf(tree_node, wf_id):
+        wf = state.workflows[wf_id]
         style = _status_style(wf.status)
-        root = ' [bold cyan][root][/]' if wf_id == state.root_workflow_id else ''
-        console.print(f'  [bold]{wf.name}[/]{root}  [dim]{wf_id}[/]  [{style}]{wf.status}[/]')
-        console.print(f'    args:       {wf.args!r}')
+        root_tag = ' [bold cyan][root][/]' if wf_id == state.root_workflow_id else ''
+        label = f'[bold]{wf.name}[/]{root_tag}  [dim]{wf_id}[/]  [{style}]{wf.status}[/]'
+        wf_node = tree_node.add(label)
+
+        wf_node.add(f'[dim]args:[/] {wf.args!r}')
 
         if wf.status == 'finished':
-            console.print(f'    result:     [green]{wf.result!r}[/]')
+            wf_node.add(f'[dim]result:[/] [green]{wf.result!r}[/]')
 
         if wf.checkpoint:
             cp = wf.checkpoint
             if cp.get('locals'):
-                console.print(f'    locals:')
+                locals_node = wf_node.add('[dim]locals:[/]')
                 for k, v in sorted(cp['locals'].items()):
-                    console.print(f'      [bold]{k}[/] = {v!r}')
+                    locals_node.add(f'[bold]{k}[/] = {v!r}')
             if cp.get('drain'):
-                console.print(f'    stack:      {cp["drain"]!r}')
+                wf_node.add(f'[dim]stack:[/] {cp["drain"]!r}')
             if cp.get('yield_idx') is not None:
-                console.print(f'    yield_idx:  {cp["yield_idx"]}')
+                wf_node.add(f'[dim]yield_idx:[/] {cp["yield_idx"]}')
             if cp.get('yv') is not None:
-                console.print(f'    yielded:    {cp["yv"]!r}')
+                wf_node.add(f'[dim]yielded:[/] {cp["yv"]!r}')
 
         handler = state.handlers.get(wf_id)
         if handler:
-            console.print(f'    handler:    [yellow]{handler.handler_type}[/]')
+            h_node = wf_node.add(f'[dim]handler:[/] [yellow]{handler.handler_type}[/]')
             for k, v in sorted(handler.state.items()):
-                console.print(f'      [bold]{k}[/] = {v!r}')
+                h_node.add(f'[bold]{k}[/] = {v!r}')
 
-        console.print()
+        for child_id in children_of.get(wf_id, []):
+            _render_wf(wf_node, child_id)
+
+    # Start from root
+    _render_wf(root_tree, state.root_workflow_id)
+
+    # Render orphans (shouldn't happen, but just in case)
+    rendered = set()
+    def _collect(wf_id):
+        rendered.add(wf_id)
+        for child_id in children_of.get(wf_id, []):
+            _collect(child_id)
+    _collect(state.root_workflow_id)
+    for wf_id in state.workflows:
+        if wf_id not in rendered:
+            _render_wf(root_tree, wf_id)
+
+    console.print(root_tree)
 
 
 def cmd_list(args):

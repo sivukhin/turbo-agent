@@ -45,8 +45,6 @@ class WaitAllHandler:
     def try_resolve(state, now):
         if all(d in state['results'] for d in state['deps']):
             ordered = [state['results'][d] for d in state['deps']]
-            if len(state['deps']) == 1:
-                return True, ordered[0]
             return True, ordered
         return False, None
 

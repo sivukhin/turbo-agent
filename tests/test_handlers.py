@@ -58,12 +58,12 @@ class TestWaitAllHandler:
         assert resolved
         assert result == [1, 2, 3]  # order matches deps, not arrival
 
-    def test_single_dep_unwraps(self):
+    def test_single_dep_returns_list(self):
         state = WaitAllHandler.initial_state(['only'])
         state = WaitAllHandler.on_event('workflow_finished', 'only', {'result': 99}, state)
         resolved, result = WaitAllHandler.try_resolve(state, 0)
         assert resolved
-        assert result == 99  # unwrapped, not [99]
+        assert result == [99]  # always a list, use wait() for unwrapped
 
     def test_ignores_unrelated(self):
         state = WaitAllHandler.initial_state(['a', 'b'])

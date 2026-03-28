@@ -57,6 +57,7 @@ def sleep(seconds):
 class WorkflowState:
     name: str
     args: list
+    parent_workflow_id: str | None = None
     checkpoint: dict | None = None
     status: str = 'running'
     result: object = None
@@ -214,7 +215,7 @@ class Engine:
                 wf.status = 'finished'
                 wf.result = e.value
                 wf.checkpoint = None
-                self._register_children(state, ctx, new_events, execution_id)
+                self._register_children(state, ctx, new_events, execution_id, workflow_id)
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
@@ -225,7 +226,7 @@ class Engine:
             finally:
                 _current_ctx.reset(token)
 
-            self._register_children(state, ctx, new_events, execution_id)
+            self._register_children(state, ctx, new_events, execution_id, workflow_id)
             wf.checkpoint = pickle.loads(g.save())
 
             if isinstance(val, WaitOp):
@@ -260,9 +261,10 @@ class Engine:
 
         return new_events
 
-    def _register_children(self, state, ctx, new_events, execution_id):
+    def _register_children(self, state, ctx, new_events, execution_id, parent_workflow_id):
         for handle in ctx.new_children:
             state.workflows[handle.id] = WorkflowState(
                 name=handle.workflow_name,
                 args=list(handle.args),
+                parent_workflow_id=parent_workflow_id,
             )

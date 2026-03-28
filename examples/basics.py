@@ -55,3 +55,40 @@ def sleepy():
     result = yield wait(child)
     yield f'done: {result}'
     return result
+
+
+@workflow
+def worker(name, n):
+    total = 0
+    for i in range(n):
+        total += i
+        yield f'{name}: step {i}, total={total}'
+    return total
+
+
+@workflow
+def supervisor(n):
+    """Spawns workers, each supervised by a sub-supervisor."""
+    workers = [worker(f'w{i}', i + 1) for i in range(n)]
+    yield f'supervisor: launched {n} workers'
+    results = yield wait_all(workers)
+    yield f'supervisor: all done, results={results}'
+    return sum(results)
+
+
+@workflow
+def deep_chain(depth):
+    """Recursive chain: each level spawns a supervisor with increasing workers.
+
+    deep_chain(3) creates:
+      deep_chain → supervisor(1) → worker("w0", 1)
+                 → supervisor(2) → worker("w0", 1), worker("w1", 2)
+                 → supervisor(3) → worker("w0", 1), worker("w1", 2), worker("w2", 3)
+    """
+    children = []
+    for i in range(depth):
+        children.append(supervisor(i + 1))
+    yield f'deep_chain: launched {depth} supervisors'
+    results = yield wait_all(children)
+    yield f'deep_chain: supervisor results={results}'
+    return sum(results)

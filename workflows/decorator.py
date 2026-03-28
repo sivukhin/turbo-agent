@@ -243,7 +243,7 @@ def workflow(func):
         ctx = _current_ctx.get()
         if ctx is not None:
             handle = WorkflowHandle(
-                wf_id=ctx.alloc_id(),
+                id=ctx.alloc_id(),
                 workflow_name=func.__name__,
                 args=list(args),
             )

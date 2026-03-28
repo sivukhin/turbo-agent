@@ -1,14 +1,13 @@
 import argparse
 import json
 import os
-import pickle
 import uuid
 import sys
 
-from workflows import workflow, wait, wait_all, wait_any, Engine
+from workflows import workflow, wait, wait_all, wait_any, Engine, Store
 
 
-EXECUTIONS_DIR = os.path.join(os.path.dirname(__file__), '.executions')
+DB_PATH = os.path.join(os.path.dirname(__file__), 'executions.db')
 
 
 # ---- example workflows ----
@@ -69,21 +68,6 @@ WORKFLOWS = {
 }
 
 
-def _exec_path(exec_id):
-    return os.path.join(EXECUTIONS_DIR, f'{exec_id}.pkl')
-
-
-def _load_state(exec_id):
-    with open(_exec_path(exec_id), 'rb') as f:
-        return pickle.load(f)
-
-
-def _save_state(exec_id, state):
-    os.makedirs(EXECUTIONS_DIR, exist_ok=True)
-    with open(_exec_path(exec_id), 'wb') as f:
-        pickle.dump(state, f)
-
-
 def cmd_start(args):
     wf_name = args.workflow
     if wf_name not in WORKFLOWS:
@@ -95,7 +79,10 @@ def cmd_start(args):
     exec_id = str(uuid.uuid4())[:8]
 
     engine, outputs = Engine.start(WORKFLOWS, wf_name, parsed_args)
-    _save_state(exec_id, engine.state)
+
+    store = Store(DB_PATH)
+    store.save(exec_id, engine.state)
+    store.close()
 
     print(f'Started execution {exec_id}')
     print(f'  workflow: {wf_name}({", ".join(args.args)})')
@@ -103,8 +90,11 @@ def cmd_start(args):
 
 
 def cmd_step(args):
-    state = _load_state(args.id)
-    if state['finished']:
+    store = Store(DB_PATH)
+    state = store.load(args.id)
+
+    if state.finished:
+        store.close()
         print(f'Execution {args.id} already finished')
         sys.exit(1)
 
@@ -114,54 +104,57 @@ def cmd_step(args):
     try:
         outputs, finished = engine.step(send_val)
     except Exception as e:
-        print(f'  step {state["step"]} → error: {e}', file=sys.stderr)
+        store.close()
+        print(f'  step {state.step} → error: {e}', file=sys.stderr)
         sys.exit(1)
 
-    _save_state(args.id, engine.state)
+    store.save(args.id, engine.state)
+    store.close()
+
     _print_outputs(engine.state, outputs)
 
     if finished:
-        root = state['workflows'][state['root']]
-        print(f'  → returned: {root["result"]!r}')
+        root = state.workflows[state.root]
+        print(f'  → returned: {root.result!r}')
 
 
 def _print_outputs(state, outputs):
-    step = state['step']
     for wf_id, wf_name, val in outputs:
-        print(f'  step {step} [{wf_name}#{wf_id}] → {val!r}')
+        print(f'  step {state.step} [{wf_name}#{wf_id}] → {val!r}')
 
 
 def cmd_status(args):
-    state = _load_state(args.id)
+    store = Store(DB_PATH)
+    state = store.load(args.id)
+    store.close()
+
     print(f'Execution {args.id}')
-    print(f'  step:     {state["step"]}')
-    print(f'  finished: {state["finished"]}')
-    print(f'  workflows ({len(state["workflows"])}):')
-    for wf_id, wf in sorted(state['workflows'].items(), key=lambda x: x[0]):
-        status = wf['status']
+    print(f'  step:     {state.step}')
+    print(f'  finished: {state.finished}')
+    print(f'  workflows ({len(state.workflows)}):')
+    for wf_id, wf in sorted(state.workflows.items(), key=lambda x: x[0]):
         extra = ''
-        if status == 'waiting':
-            deps = wf.get('wait_deps', [])
-            mode = wf.get('wait_mode', 'all')
-            extra = f' ({mode} of {", ".join("#"+d for d in deps)})'
-        if status == 'finished':
-            extra = f' result={wf["result"]!r}'
-        root = ' [root]' if wf_id == state['root'] else ''
-        print(f'    #{wf_id} {wf["name"]}{root}  {status}{extra}')
+        if wf.status == 'waiting':
+            extra = f' ({wf.wait_mode} of {", ".join("#"+d for d in wf.wait_deps)})'
+        if wf.status == 'finished':
+            extra = f' result={wf.result!r}'
+        root = ' [root]' if wf_id == state.root else ''
+        print(f'    #{wf_id} {wf.name}{root}  {wf.status}{extra}')
 
 
 def cmd_list(args):
-    if not os.path.isdir(EXECUTIONS_DIR):
+    store = Store(DB_PATH)
+    all_execs = store.list_all()
+    store.close()
+
+    if not all_execs:
         print('No executions yet.')
         return
-    for fname in sorted(os.listdir(EXECUTIONS_DIR)):
-        if not fname.endswith('.pkl'):
-            continue
-        exec_id = fname[:-4]
-        state = _load_state(exec_id)
-        status = 'finished' if state['finished'] else f'step {state["step"]}'
-        n_wf = len(state['workflows'])
-        print(f'  {exec_id}  {state["workflows"][state["root"]]["name"]} ({n_wf} workflows)  [{status}]')
+    for exec_id, state in all_execs:
+        status = 'finished' if state.finished else f'step {state.step}'
+        n_wf = len(state.workflows)
+        root_name = state.workflows[state.root].name
+        print(f'  {exec_id}  {root_name} ({n_wf} workflows)  [{status}]')
 
 
 def main():

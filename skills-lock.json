@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "turso-db": {
+      "source": "tursodatabase/agent-skills",
+      "sourceType": "github",
+      "computedHash": "d1aa5693c437b9bb848642fe04d613097fe54200c8190f09e7351f7d473c6b83"
+    }
+  }
+}

@@ -1,8 +1,9 @@
 """Handler registry for wait operations.
 
 Each handler has:
+  initial_state(args) -> state
   on_message(msg_type, msg_workflow_id, payload, state) -> state
-  try_resolve(state) -> (resolved, result)
+  try_resolve(state, now) -> (resolved, result)
 """
 
 
@@ -20,7 +21,7 @@ class WaitHandler:
         return state
 
     @staticmethod
-    def try_resolve(state):
+    def try_resolve(state, now):
         if state['resolved']:
             return True, state['result']
         return False, None
@@ -41,10 +42,9 @@ class WaitAllHandler:
         return state
 
     @staticmethod
-    def try_resolve(state):
+    def try_resolve(state, now):
         if all(d in state['results'] for d in state['deps']):
             ordered = [state['results'][d] for d in state['deps']]
-            # Single dep: unwrap
             if len(state['deps']) == 1:
                 return True, ordered[0]
             return True, ordered
@@ -66,7 +66,7 @@ class WaitAnyHandler:
         return state
 
     @staticmethod
-    def try_resolve(state):
+    def try_resolve(state, now):
         if state['results']:
             result = [
                 (True, state['results'][d]) if d in state['results'] else (False, None)
@@ -76,8 +76,27 @@ class WaitAnyHandler:
         return False, None
 
 
+class SleepHandler:
+    """Sleep until a given timestamp. Resolves when now >= wake_at."""
+
+    @staticmethod
+    def initial_state(wake_at):
+        return {'wake_at': wake_at}
+
+    @staticmethod
+    def on_message(msg_type, msg_workflow_id, payload, state):
+        return state
+
+    @staticmethod
+    def try_resolve(state, now):
+        if now >= state['wake_at']:
+            return True, None
+        return False, None
+
+
 HANDLER_REGISTRY = {
     'wait': WaitHandler,
     'wait_all': WaitAllHandler,
     'wait_any': WaitAnyHandler,
+    'sleep': SleepHandler,
 }

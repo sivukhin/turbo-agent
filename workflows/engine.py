@@ -1,4 +1,5 @@
 import pickle
+import time
 import uuid
 from dataclasses import dataclass, field
 from workflows.decorator import _TickContext, _current_ctx
@@ -28,6 +29,11 @@ class WaitOp:
     mode: str  # 'wait' | 'wait_all' | 'wait_any'
 
 
+@dataclass
+class SleepOp:
+    seconds: float
+
+
 def wait(handle):
     return WaitOp(deps=[handle.id], mode='wait')
 
@@ -38,6 +44,11 @@ def wait_all(handles):
 
 def wait_any(handles):
     return WaitOp(deps=[h.id for h in handles], mode='wait_any')
+
+
+def sleep(seconds):
+    """Pause the workflow for `seconds`. Resumes when engine time >= wake_at."""
+    return SleepOp(seconds=seconds)
 
 
 # ---- state ----
@@ -79,13 +90,17 @@ class ExecutionState:
 # ---- engine ----
 
 class Engine:
-    """Event-sourced workflow engine. All state transitions are driven by messages."""
+    """Event-sourced workflow engine. All state transitions are driven by messages.
+
+    Pass `now` to start/step/process to control time (for sleep support and testing).
+    If omitted, uses time.time().
+    """
 
     def __init__(self, registry: dict):
         self.registry = registry
 
-    def start(self, store, workflow_name, args) -> str:
-        """Create a new execution, write initial tick, process it."""
+    def start(self, store, workflow_name, args, now=None) -> str:
+        now = now if now is not None else time.time()
         execution_id = _uuid()
         root_workflow_id = _uuid()
         state = ExecutionState(
@@ -95,17 +110,16 @@ class Engine:
         )
         store.save_state(execution_id, state)
         store.append_message(execution_id, None, 'inbox', 'tick', {})
-        self.process(store, execution_id)
+        self.process(store, execution_id, now=now)
         return execution_id
 
-    def step(self, store, execution_id):
-        """Send a tick and process all resulting messages."""
+    def step(self, store, execution_id, now=None):
+        now = now if now is not None else time.time()
         store.append_message(execution_id, None, 'inbox', 'tick', {})
-        self.process(store, execution_id)
+        self.process(store, execution_id, now=now)
 
-    def process(self, store, execution_id):
-        """Process all unprocessed inbox messages for an execution.
-        Loops until no new inbox messages remain."""
+    def process(self, store, execution_id, now=None):
+        now = now if now is not None else time.time()
         while True:
             state, last_processed = store.load_state(execution_id)
             messages = store.read_inbox(execution_id, after_msg_id=last_processed)
@@ -115,42 +129,37 @@ class Engine:
             new_messages = []
 
             for msg in messages:
-                # Feed to all active handlers
                 for handler_wf_id, hs in list(state.handlers.items()):
                     handler_cls = HANDLER_REGISTRY[hs.handler_type]
                     hs.state = handler_cls.on_message(
                         msg.type, msg.workflow_id, msg.payload, hs.state,
                     )
 
-                # Process tick messages
                 if msg.type == 'tick':
-                    tick_msgs = self._handle_tick(state, execution_id)
+                    tick_msgs = self._handle_tick(state, execution_id, now)
                     new_messages.extend(tick_msgs)
 
             # Try to resolve all handlers
             for handler_wf_id in list(state.handlers):
                 hs = state.handlers[handler_wf_id]
                 handler_cls = HANDLER_REGISTRY[hs.handler_type]
-                resolved, result = handler_cls.try_resolve(hs.state)
+                resolved, result = handler_cls.try_resolve(hs.state, now)
                 if resolved:
                     wf = state.workflows[handler_wf_id]
                     wf.status = 'running'
                     wf.send_val = result
                     del state.handlers[handler_wf_id]
 
-            # Check root
             root = state.workflows[state.root_workflow_id]
             if root.status == 'finished':
                 state.finished = True
 
-            # Persist
             last_msg_id = messages[-1].msg_id
             store.save_state(execution_id, state, last_processed_msg_id=last_msg_id)
             for m in new_messages:
                 store.append_message(m.execution_id, m.workflow_id, m.category, m.type, m.payload)
 
-    def _handle_tick(self, state, execution_id):
-        """Tick all running workflows. Returns list of new messages to write."""
+    def _handle_tick(self, state, execution_id, now):
         new_messages = []
 
         for workflow_id, wf in list(state.workflows.items()):
@@ -197,7 +206,6 @@ class Engine:
                     handler_type=val.mode,
                     state=handler_cls.initial_state(val.deps),
                 )
-                # Catch up: feed handler with already-finished deps
                 for dep_id in val.deps:
                     dep_wf = state.workflows.get(dep_id)
                     if dep_wf and dep_wf.status == 'finished':
@@ -206,6 +214,13 @@ class Engine:
                             {'result': dep_wf.result}, hs.state,
                         )
                 state.handlers[workflow_id] = hs
+            elif isinstance(val, SleepOp):
+                handler_cls = HANDLER_REGISTRY['sleep']
+                wf.status = 'waiting'
+                state.handlers[workflow_id] = HandlerState(
+                    handler_type='sleep',
+                    state=handler_cls.initial_state(now + val.seconds),
+                )
             else:
                 new_messages.append(Message(
                     msg_id=0, execution_id=execution_id,

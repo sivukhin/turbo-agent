@@ -1,6 +1,6 @@
 import pickle
 import pytest
-from workflows import workflow, wait, wait_all, wait_any, Engine, Store
+from workflows import workflow, wait, wait_all, wait_any, sleep, Engine, Store
 
 
 # ---- test workflows ----
@@ -175,6 +175,31 @@ def grandparent():
     result = yield wait(child)
     return result
 
+@workflow
+def sleeper():
+    yield 'before sleep'
+    yield sleep(10.0)
+    yield 'after sleep'
+    return 'done'
+
+@workflow
+def multi_sleep():
+    yield 'start'
+    yield sleep(5.0)
+    yield 'mid'
+    yield sleep(3.0)
+    yield 'end'
+    return 'done'
+
+@workflow
+def sleep_with_children():
+    child = counter(3)
+    yield 'started'
+    yield sleep(10.0)
+    yield 'slept'
+    result = yield wait(child)
+    return result
+
 
 REGISTRY = {
     'counter': counter,
@@ -199,6 +224,9 @@ REGISTRY = {
     'waiter': waiter,
     'status_test': status_test,
     'grandparent': grandparent,
+    'sleeper': sleeper,
+    'multi_sleep': multi_sleep,
+    'sleep_with_children': sleep_with_children,
 }
 
 
@@ -439,3 +467,127 @@ class TestCheckpointResume:
         assert state.finished
         assert state.workflows[state.root_workflow_id].result == 5
         store2.close()
+
+
+class TestSleep:
+    def test_sleep_blocks_until_time(self, env):
+        engine, store = env
+        # start at t=100: yields 'before sleep'
+        eid = engine.start(store, 'sleeper', [], now=100.0)
+        # step at t=100: yields sleep(10) → waiting, wake_at=110
+        engine.step(store, eid, now=100.0)
+        state, _ = store.load_state(eid)
+        root = state.workflows[state.root_workflow_id]
+        assert root.status == 'waiting'
+
+    def test_sleep_does_not_resolve_early(self, env):
+        engine, store = env
+        eid = engine.start(store, 'sleeper', [], now=100.0)
+        engine.step(store, eid, now=100.0)  # registers sleep, wake_at=110
+        engine.step(store, eid, now=105.0)  # too early
+        state, _ = store.load_state(eid)
+        root = state.workflows[state.root_workflow_id]
+        assert root.status == 'waiting'
+
+    def test_sleep_resolves_at_wake_time(self, env):
+        engine, store = env
+        eid = engine.start(store, 'sleeper', [], now=100.0)
+        engine.step(store, eid, now=100.0)  # sleep registered, wake_at=110
+        engine.step(store, eid, now=110.0)  # resolves
+        state, _ = store.load_state(eid)
+        root = state.workflows[state.root_workflow_id]
+        assert root.status == 'running'
+
+    def test_sleep_full_lifecycle(self, env):
+        engine, store = env
+        eid = engine.start(store, 'sleeper', [], now=0.0)
+        engine.step(store, eid, now=0.0)    # sleep(10) → waiting, wake_at=10
+        engine.step(store, eid, now=5.0)    # too early
+        state, _ = store.load_state(eid)
+        assert not state.finished
+
+        engine.step(store, eid, now=10.0)   # resolves sleep
+        engine.step(store, eid, now=10.0)   # yields 'after sleep'
+        engine.step(store, eid, now=10.0)   # returns 'done'
+        state, _ = store.load_state(eid)
+        assert state.finished
+        assert state.workflows[state.root_workflow_id].result == 'done'
+
+    def test_multiple_sleeps(self, env):
+        engine, store = env
+        eid = engine.start(store, 'multi_sleep', [], now=0.0)
+        # After start: yielded 'start'
+        engine.step(store, eid, now=0.0)    # sleep(5) → waiting, wake_at=5
+
+        engine.step(store, eid, now=3.0)    # too early
+        state, _ = store.load_state(eid)
+        assert not state.finished
+
+        engine.step(store, eid, now=5.0)    # first sleep resolves
+        engine.step(store, eid, now=5.0)    # yields 'mid'
+        engine.step(store, eid, now=5.0)    # sleep(3) → waiting, wake_at=8
+
+        engine.step(store, eid, now=7.0)    # too early
+        state, _ = store.load_state(eid)
+        assert not state.finished
+
+        engine.step(store, eid, now=8.0)    # second sleep resolves
+        engine.step(store, eid, now=8.0)    # yields 'end'
+        engine.step(store, eid, now=8.0)    # returns 'done'
+        state, _ = store.load_state(eid)
+        assert state.finished
+        assert state.workflows[state.root_workflow_id].result == 'done'
+
+    def test_sleep_with_concurrent_children(self, env):
+        """Children tick while parent sleeps."""
+        engine, store = env
+        eid = engine.start(store, 'sleep_with_children', [], now=0.0)
+        # After start: yields 'started'. Child registered.
+        engine.step(store, eid, now=0.0)    # parent: sleep(10), wake_at=10. child: yields 0
+        engine.step(store, eid, now=1.0)    # child: yields 1
+        engine.step(store, eid, now=2.0)    # child: yields 2
+        engine.step(store, eid, now=3.0)    # child: finishes (counter(3) → return 3)
+
+        state, _ = store.load_state(eid)
+        assert not state.finished  # parent still sleeping
+
+        engine.step(store, eid, now=10.0)   # sleep resolves
+        engine.step(store, eid, now=10.0)   # yields 'slept'
+        engine.step(store, eid, now=10.0)   # wait(child) → already done, resolves
+        engine.step(store, eid, now=10.0)   # returns result
+        state, _ = store.load_state(eid)
+        assert state.finished
+        assert state.workflows[state.root_workflow_id].result == 3
+
+    def test_sleep_outbox_messages(self, env):
+        engine, store = env
+        eid = engine.start(store, 'sleeper', [], now=0.0)
+        outbox = store.read_outbox(eid)
+        values = [m.payload['value'] for m in outbox if m.type == 'workflow_yielded']
+        assert 'before sleep' in values
+
+        engine.step(store, eid, now=0.0)    # sleep
+        engine.step(store, eid, now=10.0)   # wake
+        engine.step(store, eid, now=10.0)   # yields 'after sleep'
+        outbox = store.read_outbox(eid)
+        values = [m.payload['value'] for m in outbox if m.type == 'workflow_yielded']
+        assert 'after sleep' in values
+
+    def test_sleep_zero_resolves_immediately(self, env):
+        """sleep(0) should resolve on the same tick."""
+        @workflow
+        def instant_sleep():
+            yield 'before'
+            yield sleep(0)
+            yield 'after'
+            return 'done'
+
+        reg = {**REGISTRY, 'instant_sleep': instant_sleep}
+        engine = Engine(reg)
+        store = env[1]
+        eid = engine.start(store, 'instant_sleep', [], now=100.0)
+        engine.step(store, eid, now=100.0)  # sleep(0) → resolves immediately
+        engine.step(store, eid, now=100.0)  # yields 'after'
+        engine.step(store, eid, now=100.0)  # returns
+        state, _ = store.load_state(eid)
+        assert state.finished

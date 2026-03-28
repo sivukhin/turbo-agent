@@ -172,6 +172,49 @@ def _format_payload(event_type, payload):
     return repr(payload) if payload else ''
 
 
+def cmd_inspect(args):
+    store = Store(DB_PATH)
+    state, last_event = store.load_state(args.id)
+    store.close()
+
+    console.print(f'[bold]Execution[/] [cyan]{args.id}[/]')
+    console.print(f'  source:       [dim]{state.source_file}[/]')
+    finished_text = '[green]yes[/]' if state.finished else '[yellow]no[/]'
+    console.print(f'  finished:     {finished_text}')
+    console.print(f'  last_event:   {last_event}')
+    console.print()
+
+    for wf_id, wf in sorted(state.workflows.items()):
+        style = _status_style(wf.status)
+        root = ' [bold cyan][root][/]' if wf_id == state.root_workflow_id else ''
+        console.print(f'  [bold]{wf.name}[/]{root}  [dim]{wf_id}[/]  [{style}]{wf.status}[/]')
+        console.print(f'    args:       {wf.args!r}')
+
+        if wf.status == 'finished':
+            console.print(f'    result:     [green]{wf.result!r}[/]')
+
+        if wf.checkpoint:
+            cp = wf.checkpoint
+            if cp.get('locals'):
+                console.print(f'    locals:')
+                for k, v in sorted(cp['locals'].items()):
+                    console.print(f'      [bold]{k}[/] = {v!r}')
+            if cp.get('drain'):
+                console.print(f'    stack:      {cp["drain"]!r}')
+            if cp.get('yield_idx') is not None:
+                console.print(f'    yield_idx:  {cp["yield_idx"]}')
+            if cp.get('yv') is not None:
+                console.print(f'    yielded:    {cp["yv"]!r}')
+
+        handler = state.handlers.get(wf_id)
+        if handler:
+            console.print(f'    handler:    [yellow]{handler.handler_type}[/]')
+            for k, v in sorted(handler.state.items()):
+                console.print(f'      [bold]{k}[/] = {v!r}')
+
+        console.print()
+
+
 def cmd_list(args):
     store = Store(DB_PATH)
     all_execs = store.list_executions()
@@ -216,12 +259,15 @@ def main():
     p_events = sub.add_parser('events', help='Show inbox/outbox events')
     p_events.add_argument('id', help='Execution ID')
 
+    p_inspect = sub.add_parser('inspect', help='Inspect full execution state')
+    p_inspect.add_argument('id', help='Execution ID')
+
     sub.add_parser('list', help='List all executions')
 
     args = parser.parse_args()
     cmds = {
         'start': cmd_start, 'step': cmd_step, 'status': cmd_status,
-        'events': cmd_events, 'list': cmd_list,
+        'events': cmd_events, 'inspect': cmd_inspect, 'list': cmd_list,
     }
     cmds[args.command](args)
 

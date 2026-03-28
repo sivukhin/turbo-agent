@@ -2,7 +2,7 @@
 
 Each handler has:
   initial_state(args) -> state
-  on_message(msg_type, msg_workflow_id, payload, state) -> state
+  on_event(event_type, event_workflow_id, payload, state) -> state
   try_resolve(state, now) -> (resolved, result)
 """
 
@@ -15,8 +15,8 @@ class WaitHandler:
         return {'dep': deps[0], 'result': None, 'resolved': False}
 
     @staticmethod
-    def on_message(msg_type, msg_workflow_id, payload, state):
-        if msg_type == 'workflow_finished' and msg_workflow_id == state['dep']:
+    def on_event(event_type, event_workflow_id, payload, state):
+        if event_type == 'workflow_finished' and event_workflow_id == state['dep']:
             return {**state, 'result': payload['result'], 'resolved': True}
         return state
 
@@ -35,9 +35,9 @@ class WaitAllHandler:
         return {'deps': list(deps), 'results': {}}
 
     @staticmethod
-    def on_message(msg_type, msg_workflow_id, payload, state):
-        if msg_type == 'workflow_finished' and msg_workflow_id in state['deps']:
-            results = {**state['results'], msg_workflow_id: payload['result']}
+    def on_event(event_type, event_workflow_id, payload, state):
+        if event_type == 'workflow_finished' and event_workflow_id in state['deps']:
+            results = {**state['results'], event_workflow_id: payload['result']}
             return {**state, 'results': results}
         return state
 
@@ -59,9 +59,9 @@ class WaitAnyHandler:
         return {'deps': list(deps), 'results': {}}
 
     @staticmethod
-    def on_message(msg_type, msg_workflow_id, payload, state):
-        if msg_type == 'workflow_finished' and msg_workflow_id in state['deps']:
-            results = {**state['results'], msg_workflow_id: payload['result']}
+    def on_event(event_type, event_workflow_id, payload, state):
+        if event_type == 'workflow_finished' and event_workflow_id in state['deps']:
+            results = {**state['results'], event_workflow_id: payload['result']}
             return {**state, 'results': results}
         return state
 
@@ -84,7 +84,7 @@ class SleepHandler:
         return {'wake_at': wake_at}
 
     @staticmethod
-    def on_message(msg_type, msg_workflow_id, payload, state):
+    def on_event(event_type, event_workflow_id, payload, state):
         return state
 
     @staticmethod

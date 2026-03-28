@@ -386,9 +386,9 @@ class TestConcurrency:
         engine, store = env
         eid = engine.start(store, 'parent_wait_all', [3])
         outbox_before = store.read_outbox(eid)
-        last = outbox_before[-1].msg_id if outbox_before else 0
+        last = outbox_before[-1].event_id if outbox_before else 0
         engine.step(store, eid)
-        new_outbox = store.read_outbox(eid, after_msg_id=last)
+        new_outbox = store.read_outbox(eid, after_event_id=last)
         child_outputs = [m for m in new_outbox if m.type == 'workflow_yielded'
                          and m.workflow_id != store.load_state(eid)[0].root_workflow_id]
         assert len(child_outputs) == 2

@@ -1,7 +1,7 @@
 from workflows.decorator import workflow, DurableGenerator
 from workflows.engine import (
     Engine, ExecutionState, WorkflowState, WorkflowHandle,
-    HandlerState, Message, WaitOp, SleepOp,
+    HandlerState, Event, WaitOp, SleepOp,
     wait, wait_all, wait_any, sleep,
 )
 from workflows.handlers import (
@@ -13,7 +13,7 @@ from workflows.store import Store
 __all__ = [
     'workflow', 'DurableGenerator',
     'Engine', 'ExecutionState', 'WorkflowState', 'WorkflowHandle',
-    'HandlerState', 'Message', 'WaitOp', 'SleepOp',
+    'HandlerState', 'Event', 'WaitOp', 'SleepOp',
     'wait', 'wait_all', 'wait_any', 'sleep',
     'WaitHandler', 'WaitAllHandler', 'WaitAnyHandler', 'SleepHandler',
     'HANDLER_REGISTRY',

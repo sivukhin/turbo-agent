@@ -51,9 +51,9 @@ class TestStoreBasic:
     def test_save_and_load(self, env):
         engine, store = env
         eid = engine.start(store, 'counter', [5])
-        state, last_msg = store.load_state(eid)
+        state, last_event = store.load_state(eid)
         assert not state.finished
-        assert last_msg > 0
+        assert last_event > 0
 
     def test_load_nonexistent(self, env):
         _, store = env
@@ -71,38 +71,38 @@ class TestStoreBasic:
         assert eid2 in ids
 
 
-class TestStoreMessages:
+class TestStoreEvents:
     def test_append_and_read_inbox(self, env):
         _, store = env
-        store.append_message('e1', 'w1', 'inbox', 'tick', {'x': 1})
-        store.append_message('e1', 'w2', 'inbox', 'tick', {'x': 2})
-        msgs = store.read_inbox('e1')
-        assert len(msgs) == 2
-        assert msgs[0].workflow_id == 'w1'
-        assert msgs[1].workflow_id == 'w2'
+        store.append_event('e1', 'w1', 'inbox', 'tick', {'x': 1})
+        store.append_event('e1', 'w2', 'inbox', 'tick', {'x': 2})
+        events = store.read_inbox('e1')
+        assert len(events) == 2
+        assert events[0].workflow_id == 'w1'
+        assert events[1].workflow_id == 'w2'
 
-    def test_read_after_msg_id(self, env):
+    def test_read_after_event_id(self, env):
         _, store = env
-        store.append_message('e1', None, 'inbox', 'tick', {})
-        store.append_message('e1', None, 'inbox', 'tick', {})
-        store.append_message('e1', None, 'inbox', 'tick', {})
-        msgs = store.read_inbox('e1')
-        assert len(msgs) == 3
-        msgs2 = store.read_inbox('e1', after_msg_id=msgs[1].msg_id)
-        assert len(msgs2) == 1
-        assert msgs2[0].msg_id == msgs[2].msg_id
+        store.append_event('e1', None, 'inbox', 'tick', {})
+        store.append_event('e1', None, 'inbox', 'tick', {})
+        store.append_event('e1', None, 'inbox', 'tick', {})
+        events = store.read_inbox('e1')
+        assert len(events) == 3
+        events2 = store.read_inbox('e1', after_event_id=events[1].event_id)
+        assert len(events2) == 1
+        assert events2[0].event_id == events[2].event_id
 
     def test_outbox_separate_from_inbox(self, env):
         _, store = env
-        store.append_message('e1', None, 'inbox', 'tick', {})
-        store.append_message('e1', 'w1', 'outbox', 'workflow_yielded', {'value': 42})
+        store.append_event('e1', None, 'inbox', 'tick', {})
+        store.append_event('e1', 'w1', 'outbox', 'workflow_yielded', {'value': 42})
         assert len(store.read_inbox('e1')) == 1
         assert len(store.read_outbox('e1')) == 1
 
-    def test_messages_scoped_to_execution(self, env):
+    def test_events_scoped_to_execution(self, env):
         _, store = env
-        store.append_message('e1', None, 'inbox', 'tick', {})
-        store.append_message('e2', None, 'inbox', 'tick', {})
+        store.append_event('e1', None, 'inbox', 'tick', {})
+        store.append_event('e2', None, 'inbox', 'tick', {})
         assert len(store.read_inbox('e1')) == 1
         assert len(store.read_inbox('e2')) == 1
 

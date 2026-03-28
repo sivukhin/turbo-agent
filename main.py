@@ -94,7 +94,7 @@ def cmd_step(args):
         sys.exit(1)
 
     outbox_before = store.read_outbox(args.id)
-    last_before = outbox_before[-1].msg_id if outbox_before else 0
+    last_before = outbox_before[-1].event_id if outbox_before else 0
 
     engine = Engine(WORKFLOWS)
     try:
@@ -105,7 +105,7 @@ def cmd_step(args):
         sys.exit(1)
 
     state, _ = store.load_state(args.id)
-    new_outbox = store.read_outbox(args.id, after_msg_id=last_before)
+    new_outbox = store.read_outbox(args.id, after_event_id=last_before)
     store.close()
 
     _print_outbox(new_outbox)
@@ -114,22 +114,22 @@ def cmd_step(args):
         print(f'  → returned: {root.result!r}')
 
 
-def _print_outbox(messages):
-    for msg in messages:
-        if msg.type == 'workflow_yielded':
-            wf_id = msg.workflow_id or '?'
-            val = msg.payload.get('value')
+def _print_outbox(events):
+    for event in events:
+        if event.type == 'workflow_yielded':
+            wf_id = event.workflow_id or '?'
+            val = event.payload.get('value')
             print(f'  [{wf_id}] → {val!r}')
 
 
 def cmd_status(args):
     store = Store(DB_PATH)
-    state, last_msg = store.load_state(args.id)
+    state, last_event = store.load_state(args.id)
     store.close()
 
     print(f'Execution {args.id}')
     print(f'  finished:       {state.finished}')
-    print(f'  last_msg_id:    {last_msg}')
+    print(f'  last_event_id:    {last_event}')
     print(f'  workflows ({len(state.workflows)}):')
     for wf_id, wf in sorted(state.workflows.items()):
         extra = ''

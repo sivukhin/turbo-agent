@@ -70,11 +70,11 @@ class HandlerState:
 
 
 @dataclass
-class Message:
-    msg_id: int
+class Event:
+    event_id: int
     execution_id: str
     workflow_id: str | None
-    category: str
+    category: str   # 'inbox' | 'outbox'
     type: str
     payload: dict
 
@@ -90,7 +90,7 @@ class ExecutionState:
 # ---- engine ----
 
 class Engine:
-    """Event-sourced workflow engine. All state transitions are driven by messages.
+    """Event-sourced workflow engine. All state transitions are driven by events.
 
     Pass `now` to start/step/process to control time (for sleep support and testing).
     If omitted, uses time.time().
@@ -109,35 +109,35 @@ class Engine:
             root_workflow_id=root_workflow_id,
         )
         store.save_state(execution_id, state)
-        store.append_message(execution_id, None, 'inbox', 'tick', {})
+        store.append_event(execution_id, None, 'inbox', 'tick', {})
         self.process(store, execution_id, now=now)
         return execution_id
 
     def step(self, store, execution_id, now=None):
         now = now if now is not None else time.time()
-        store.append_message(execution_id, None, 'inbox', 'tick', {})
+        store.append_event(execution_id, None, 'inbox', 'tick', {})
         self.process(store, execution_id, now=now)
 
     def process(self, store, execution_id, now=None):
         now = now if now is not None else time.time()
         while True:
             state, last_processed = store.load_state(execution_id)
-            messages = store.read_inbox(execution_id, after_msg_id=last_processed)
-            if not messages:
+            events = store.read_inbox(execution_id, after_event_id=last_processed)
+            if not events:
                 break
 
-            new_messages = []
+            new_events = []
 
-            for msg in messages:
+            for event in events:
                 for handler_wf_id, hs in list(state.handlers.items()):
                     handler_cls = HANDLER_REGISTRY[hs.handler_type]
-                    hs.state = handler_cls.on_message(
-                        msg.type, msg.workflow_id, msg.payload, hs.state,
+                    hs.state = handler_cls.on_event(
+                        event.type, event.workflow_id, event.payload, hs.state,
                     )
 
-                if msg.type == 'tick':
-                    tick_msgs = self._handle_tick(state, execution_id, now)
-                    new_messages.extend(tick_msgs)
+                if event.type == 'tick':
+                    tick_events = self._handle_tick(state, execution_id, now)
+                    new_events.extend(tick_events)
 
             # Try to resolve all handlers
             for handler_wf_id in list(state.handlers):
@@ -154,13 +154,13 @@ class Engine:
             if root.status == 'finished':
                 state.finished = True
 
-            last_msg_id = messages[-1].msg_id
-            store.save_state(execution_id, state, last_processed_msg_id=last_msg_id)
-            for m in new_messages:
-                store.append_message(m.execution_id, m.workflow_id, m.category, m.type, m.payload)
+            last_event_id = events[-1].event_id
+            store.save_state(execution_id, state, last_processed_event_id=last_event_id)
+            for e in new_events:
+                store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
 
     def _handle_tick(self, state, execution_id, now):
-        new_messages = []
+        new_events = []
 
         for workflow_id, wf in list(state.workflows.items()):
             if wf.status != 'running':
@@ -185,9 +185,9 @@ class Engine:
                 wf.status = 'finished'
                 wf.result = e.value
                 wf.checkpoint = None
-                self._register_children(state, ctx, new_messages, execution_id)
-                new_messages.append(Message(
-                    msg_id=0, execution_id=execution_id,
+                self._register_children(state, ctx, new_events, execution_id)
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
                     type='workflow_finished',
                     payload={'result': e.value},
@@ -196,7 +196,7 @@ class Engine:
             finally:
                 _current_ctx.reset(token)
 
-            self._register_children(state, ctx, new_messages, execution_id)
+            self._register_children(state, ctx, new_events, execution_id)
             wf.checkpoint = pickle.loads(g.save())
 
             if isinstance(val, WaitOp):
@@ -209,7 +209,7 @@ class Engine:
                 for dep_id in val.deps:
                     dep_wf = state.workflows.get(dep_id)
                     if dep_wf and dep_wf.status == 'finished':
-                        hs.state = handler_cls.on_message(
+                        hs.state = handler_cls.on_event(
                             'workflow_finished', dep_id,
                             {'result': dep_wf.result}, hs.state,
                         )
@@ -222,16 +222,16 @@ class Engine:
                     state=handler_cls.initial_state(now + val.seconds),
                 )
             else:
-                new_messages.append(Message(
-                    msg_id=0, execution_id=execution_id,
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='outbox',
                     type='workflow_yielded',
                     payload={'value': val},
                 ))
 
-        return new_messages
+        return new_events
 
-    def _register_children(self, state, ctx, new_messages, execution_id):
+    def _register_children(self, state, ctx, new_events, execution_id):
         for handle in ctx.new_children:
             state.workflows[handle.id] = WorkflowState(
                 name=handle.workflow_name,

@@ -1,6 +1,7 @@
 import pickle
 import types
 import functools
+import contextvars
 from bytecode import (
     Bytecode, Instr, Label, ControlFlowGraph,
     TryBegin, TryEnd, Compare, BinaryOp,
@@ -10,9 +11,26 @@ from bytecode import (
 _SENTINEL = object()
 _SUBSCR = BinaryOp.SUBSCR
 
+# Tick context: set by Engine during a tick so that calling a @workflow
+# inside another workflow auto-registers the child.
+_current_ctx = contextvars.ContextVar('workflow_ctx', default=None)
+
+
+class _TickContext:
+    def __init__(self, alloc_id):
+        self.new_children = []
+        self.alloc_id = alloc_id
+
+
+def _unpack_checkpoint(cp, varnames):
+    locals_dict = cp.get('locals', {})
+    restored = {v: locals_dict.get(v) for v in varnames}
+    return (cp['yield_idx'], cp['drain'], cp['yv'], restored)
+
+
+# ---- bytecode snippets ----
 
 def _emit_drain(yield_idx):
-    """Emit: save TOS → __yv__, record yield_idx, pop stack → __drain__ list."""
     loop = Label()
     done = Label()
     return [
@@ -38,7 +56,6 @@ def _emit_drain(yield_idx):
 
 
 def _emit_restore():
-    """Emit: push sentinel, push reversed(__drain__) items, push __yv__."""
     loop = Label()
     done = Label()
     return [
@@ -57,19 +74,14 @@ def _emit_restore():
     ]
 
 
-def _unpack_checkpoint(cp, varnames):
-    """Helper called from rewritten bytecode to unpack a checkpoint dict."""
-    locals_dict = cp.get('locals', {})
-    restored = {v: locals_dict.get(v) for v in varnames}
-    return (cp['yield_idx'], cp['drain'], cp['yv'], restored)
-
+# ---- DurableGenerator ----
 
 class DurableGenerator:
-    """A generator whose state can be checkpointed and resumed across restarts."""
-
-    def __init__(self, gen, finished=False):
+    def __init__(self, gen, workflow_name=None, args=None):
         self._gen = gen
-        self._finished = finished
+        self._finished = False
+        self.workflow_name = workflow_name
+        self.workflow_args = args or ()
 
     def __iter__(self):
         return self
@@ -115,21 +127,17 @@ class DurableGenerator:
         return self._finished
 
 
+# ---- @workflow decorator ----
+
 def workflow(func):
-    """Decorator that makes a generator durable (checkpointable + resumable).
+    """Makes a generator function durable and checkpointable.
 
-    Usage:
-        @workflow
-        def my_gen(n):
-            x = yield value
-            ...
-
-        g = my_gen(5)
-        val = next(g)
-        data = g.save()
-        g2 = my_gen.resume(data)
-        val = g2.send(x)
+    When called inside another @workflow (during an engine tick), auto-registers
+    as a concurrent child and returns a WorkflowHandle.
+    When called at top level, returns a DurableGenerator.
     """
+    from workflows.engine import WorkflowHandle
+
     bc = Bytecode.from_code(func.__code__)
     orig_argnames = list(bc.argnames)
     orig_varnames = [v for v in func.__code__.co_varnames
@@ -226,18 +234,31 @@ def workflow(func):
         if checkpoint is not None:
             dummy_args = (None,) * n_orig_args
             gen = raw(checkpoint, *dummy_args)
-            next(gen)  # prime: runs jump table, restores state, hits YIELD_VALUE
-            return DurableGenerator(gen)
-        return DurableGenerator(raw(None, *args))
+            next(gen)
+            return DurableGenerator(gen, workflow_name=func.__name__, args=args)
+        return DurableGenerator(raw(None, *args), workflow_name=func.__name__, args=args)
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        ctx = _current_ctx.get()
+        if ctx is not None:
+            handle = WorkflowHandle(
+                wf_id=ctx.alloc_id(),
+                workflow_name=func.__name__,
+                args=list(args),
+            )
+            ctx.new_children.append(handle)
+            return handle
         return _make_gen(*args)
 
     def resume(data):
         cp = pickle.loads(data) if isinstance(data, bytes) else data
         return _make_gen(checkpoint=cp)
 
+    def create(*args):
+        return _make_gen(*args)
+
     wrapper.resume = resume
+    wrapper.create = create
     wrapper._code = new_code
     return wrapper

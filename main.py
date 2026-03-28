@@ -5,28 +5,67 @@ import pickle
 import uuid
 import sys
 
-from workflow import workflow
+from workflows import workflow, wait, wait_all, wait_any, Engine
 
 
 EXECUTIONS_DIR = os.path.join(os.path.dirname(__file__), '.executions')
 
 
-# ---- example workflow ----
+# ---- example workflows ----
 
 @workflow
 def accumulator(n):
-    """Sum values sent at each step, adding the loop index as bonus."""
+    """Accumulate i+s for nested loops."""
     total = 0
     for i in range(n):
         for s in range(n):
             yield total
             total = total + i + s
     yield total
+    return total
 
 
-# Registry of available workflows (extend as needed)
+@workflow
+def double_accumulate(n):
+    """Run two accumulators concurrently, wait for both with wait_all."""
+    a = accumulator(n)
+    b = accumulator(n)
+    yield 'both started'
+    first, second = yield wait_all([a, b])
+    yield f'results: {first}, {second}'
+    return first + second
+
+
+@workflow
+def race(n):
+    """Launch accumulators of different sizes, return first to finish."""
+    children = [accumulator(i + 1) for i in range(n)]
+    yield f'racing {n} children'
+    winner_id, result = yield wait_any(children)
+    yield f'winner: #{winner_id} with result {result}'
+    return result
+
+
+@workflow
+def pipeline(steps):
+    """Launch accumulators concurrently, wait for each in order."""
+    children = []
+    for i in range(steps):
+        children.append(accumulator(i + 1))
+    yield f'launched {steps} children'
+    results = []
+    for i, child in enumerate(children):
+        result = yield wait(child)
+        results.append(result)
+        yield f'stage {i} done: {result}'
+    return sum(results)
+
+
 WORKFLOWS = {
     'accumulator': accumulator,
+    'double_accumulate': double_accumulate,
+    'race': race,
+    'pipeline': pipeline,
 }
 
 
@@ -46,29 +85,21 @@ def _save_state(exec_id, state):
 
 
 def cmd_start(args):
-    wf = WORKFLOWS.get(args.workflow)
-    if wf is None:
-        print(f'Unknown workflow: {args.workflow}')
+    wf_name = args.workflow
+    if wf_name not in WORKFLOWS:
+        print(f'Unknown workflow: {wf_name}')
         print(f'Available: {", ".join(WORKFLOWS)}')
         sys.exit(1)
 
     parsed_args = [json.loads(a) for a in args.args]
     exec_id = str(uuid.uuid4())[:8]
 
-    g = wf(*parsed_args)
-    val = next(g)
-
-    state = {
-        'workflow': args.workflow,
-        'checkpoint': g.save(),
-        'step': 0,
-        'finished': g.finished,
-    }
-    _save_state(exec_id, state)
+    engine, outputs = Engine.start(WORKFLOWS, wf_name, parsed_args)
+    _save_state(exec_id, engine.state)
 
     print(f'Started execution {exec_id}')
-    print(f'  workflow: {args.workflow}({", ".join(args.args)})')
-    print(f'  step 0 → yielded: {val}')
+    print(f'  workflow: {wf_name}({", ".join(args.args)})')
+    _print_outputs(engine.state, outputs)
 
 
 def cmd_step(args):
@@ -77,42 +108,46 @@ def cmd_step(args):
         print(f'Execution {args.id} already finished')
         sys.exit(1)
 
-    wf = WORKFLOWS[state['workflow']]
-    g = wf.resume(state['checkpoint'])
-
+    engine = Engine(state, WORKFLOWS)
     send_val = json.loads(args.value) if args.value is not None else None
-    step = state['step'] + 1
 
     try:
-        val = g.send(send_val)
-        state['checkpoint'] = g.save()
-        state['step'] = step
-        state['finished'] = g.finished
-        _save_state(args.id, state)
-        print(f'  step {step} → yielded: {val}')
-    except StopIteration:
-        state['finished'] = True
-        state['checkpoint'] = None
-        state['step'] = step
-        _save_state(args.id, state)
-        print(f'  step {step} → finished')
+        outputs, finished = engine.step(send_val)
     except Exception as e:
-        print(f'  step {step} → error: {e}', file=sys.stderr)
+        print(f'  step {state["step"]} → error: {e}', file=sys.stderr)
         sys.exit(1)
+
+    _save_state(args.id, engine.state)
+    _print_outputs(engine.state, outputs)
+
+    if finished:
+        root = state['workflows'][state['root']]
+        print(f'  → returned: {root["result"]!r}')
+
+
+def _print_outputs(state, outputs):
+    step = state['step']
+    for wf_id, wf_name, val in outputs:
+        print(f'  step {step} [{wf_name}#{wf_id}] → {val!r}')
 
 
 def cmd_status(args):
     state = _load_state(args.id)
     print(f'Execution {args.id}')
-    print(f'  workflow: {state["workflow"]}')
     print(f'  step:     {state["step"]}')
     print(f'  finished: {state["finished"]}')
-    if state['checkpoint']:
-        cp = pickle.loads(state['checkpoint'])
-        print(f'  yield_idx: {cp["yield_idx"]}')
-        print(f'  locals:    {cp["locals"]}')
-        print(f'  yielded:   {cp["yv"]}')
-        print(f'  stack:     {cp["drain"]}')
+    print(f'  workflows ({len(state["workflows"])}):')
+    for wf_id, wf in sorted(state['workflows'].items(), key=lambda x: x[0]):
+        status = wf['status']
+        extra = ''
+        if status == 'waiting':
+            deps = wf.get('wait_deps', [])
+            mode = wf.get('wait_mode', 'all')
+            extra = f' ({mode} of {", ".join("#"+d for d in deps)})'
+        if status == 'finished':
+            extra = f' result={wf["result"]!r}'
+        root = ' [root]' if wf_id == state['root'] else ''
+        print(f'    #{wf_id} {wf["name"]}{root}  {status}{extra}')
 
 
 def cmd_list(args):
@@ -125,7 +160,8 @@ def cmd_list(args):
         exec_id = fname[:-4]
         state = _load_state(exec_id)
         status = 'finished' if state['finished'] else f'step {state["step"]}'
-        print(f'  {exec_id}  {state["workflow"]}  [{status}]')
+        n_wf = len(state['workflows'])
+        print(f'  {exec_id}  {state["workflows"][state["root"]]["name"]} ({n_wf} workflows)  [{status}]')
 
 
 def main():
@@ -136,9 +172,9 @@ def main():
     p_start.add_argument('workflow', help='Workflow name')
     p_start.add_argument('args', nargs='*', help='JSON-encoded arguments')
 
-    p_step = sub.add_parser('step', help='Send a value and advance one step')
+    p_step = sub.add_parser('step', help='Advance all active workflows one tick')
     p_step.add_argument('id', help='Execution ID')
-    p_step.add_argument('value', nargs='?', help='JSON-encoded value to send (default: null)')
+    p_step.add_argument('value', nargs='?', help='JSON-encoded value to send to root')
 
     p_status = sub.add_parser('status', help='Show execution status')
     p_status.add_argument('id', help='Execution ID')

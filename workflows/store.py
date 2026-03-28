@@ -1,18 +1,10 @@
 import pickle
 import turso
-from workflows.engine import ExecutionState, WorkflowState
-
-
-def _pickle_or_none(val):
-    return pickle.dumps(val) if val is not None else None
-
-
-def _unpickle_or_none(data):
-    return pickle.loads(data) if data is not None else None
+from workflows.engine import ExecutionState, Message
 
 
 class Store:
-    """Persists execution state in a Turso (Limbo) database."""
+    """Persists execution state and messages in a Turso database."""
 
     def __init__(self, db_path: str):
         self.conn = turso.connect(db_path)
@@ -22,106 +14,116 @@ class Store:
         cur = self.conn.cursor()
         cur.executescript("""
             CREATE TABLE IF NOT EXISTS executions (
-                id TEXT PRIMARY KEY,
-                root TEXT NOT NULL,
-                next_id INTEGER NOT NULL DEFAULT 1,
-                step INTEGER NOT NULL DEFAULT 0,
+                execution_id TEXT PRIMARY KEY,
+                state BLOB NOT NULL,
+                last_processed_msg_id INTEGER NOT NULL DEFAULT 0,
                 finished INTEGER NOT NULL DEFAULT 0
             );
 
-            CREATE TABLE IF NOT EXISTS workflows (
-                exec_id TEXT NOT NULL,
-                wf_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                args BLOB NOT NULL,
-                checkpoint BLOB,
-                status TEXT NOT NULL DEFAULT 'running',
-                wait_deps BLOB,
-                wait_mode TEXT,
-                result BLOB,
-                send_val BLOB,
-                PRIMARY KEY (exec_id, wf_id),
-                FOREIGN KEY (exec_id) REFERENCES executions(id)
+            CREATE TABLE IF NOT EXISTS messages (
+                msg_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_id TEXT NOT NULL,
+                workflow_id TEXT,
+                category TEXT NOT NULL,
+                type TEXT NOT NULL,
+                payload BLOB
             );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_inbox
+                ON messages (execution_id, category, msg_id)
+                WHERE category = 'inbox';
+
+            CREATE INDEX IF NOT EXISTS idx_messages_outbox
+                ON messages (execution_id, category, msg_id)
+                WHERE category = 'outbox';
         """)
         self.conn.commit()
 
-    def save(self, exec_id: str, state: ExecutionState):
+    def save_state(self, execution_id: str, state: ExecutionState,
+                   last_processed_msg_id: int | None = None):
         cur = self.conn.cursor()
         cur.execute(
-            """INSERT OR REPLACE INTO executions (id, root, next_id, step, finished)
-               VALUES (?, ?, ?, ?, ?)""",
-            (exec_id, state.root, state.next_id, state.step, int(state.finished)),
+            "SELECT last_processed_msg_id FROM executions WHERE execution_id = ?",
+            (execution_id,),
         )
-        cur.execute("DELETE FROM workflows WHERE exec_id = ?", (exec_id,))
-        for wf_id, wf in state.workflows.items():
-            cur.execute(
-                """INSERT INTO workflows
-                   (exec_id, wf_id, name, args, checkpoint, status,
-                    wait_deps, wait_mode, result, send_val)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    exec_id,
-                    wf_id,
-                    wf.name,
-                    pickle.dumps(wf.args),
-                    _pickle_or_none(wf.checkpoint),
-                    wf.status,
-                    pickle.dumps(wf.wait_deps) if wf.wait_deps else None,
-                    wf.wait_mode,
-                    _pickle_or_none(wf.result),
-                    _pickle_or_none(wf._send_val),
-                ),
-            )
+        row = cur.fetchone()
+        lp = last_processed_msg_id if last_processed_msg_id is not None else (row[0] if row else 0)
+
+        cur.execute(
+            """INSERT OR REPLACE INTO executions
+               (execution_id, state, last_processed_msg_id, finished)
+               VALUES (?, ?, ?, ?)""",
+            (execution_id, pickle.dumps(state), lp, int(state.finished)),
+        )
         self.conn.commit()
 
-    def load(self, exec_id: str) -> ExecutionState:
+    def load_state(self, execution_id: str) -> tuple[ExecutionState, int]:
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT root, next_id, step, finished FROM executions WHERE id = ?",
-            (exec_id,),
+            "SELECT state, last_processed_msg_id FROM executions WHERE execution_id = ?",
+            (execution_id,),
         )
         row = cur.fetchone()
         if row is None:
-            raise KeyError(f"Execution {exec_id} not found")
-        root, next_id, step, finished = row
+            raise KeyError(f"Execution {execution_id} not found")
+        return pickle.loads(row[0]), row[1]
 
-        cur.execute(
-            """SELECT wf_id, name, args, checkpoint, status,
-                      wait_deps, wait_mode, result, send_val
-               FROM workflows WHERE exec_id = ?""",
-            (exec_id,),
-        )
-        workflows = {}
-        for row in cur.fetchall():
-            wf_id, name, args_b, cp_b, status, deps_b, wait_mode, result_b, sv_b = row
-            wf = WorkflowState(
-                name=name,
-                args=pickle.loads(args_b),
-                checkpoint=_unpickle_or_none(cp_b),
-                status=status,
-                wait_deps=pickle.loads(deps_b) if deps_b is not None else [],
-                wait_mode=wait_mode,
-                result=_unpickle_or_none(result_b),
-            )
-            wf._send_val = _unpickle_or_none(sv_b)
-            workflows[wf_id] = wf
-
-        return ExecutionState(
-            workflows=workflows,
-            root=root,
-            next_id=next_id,
-            step=step,
-            finished=bool(finished),
-        )
-
-    def list_all(self) -> list[tuple[str, ExecutionState]]:
+    def append_message(self, execution_id: str, workflow_id: str | None,
+                       category: str, msg_type: str, payload: dict):
         cur = self.conn.cursor()
-        cur.execute("SELECT id FROM executions ORDER BY id")
-        results = []
-        for (exec_id,) in cur.fetchall():
-            results.append((exec_id, self.load(exec_id)))
-        return results
+        cur.execute(
+            """INSERT INTO messages (execution_id, workflow_id, category, type, payload)
+               VALUES (?, ?, ?, ?, ?)""",
+            (execution_id, workflow_id, category, msg_type, pickle.dumps(payload)),
+        )
+        self.conn.commit()
+
+    def read_inbox(self, execution_id: str, after_msg_id: int = 0) -> list[Message]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """SELECT msg_id, execution_id, workflow_id, category, type, payload
+               FROM messages
+               WHERE execution_id = ? AND category = 'inbox' AND msg_id > ?
+               ORDER BY msg_id""",
+            (execution_id, after_msg_id),
+        )
+        return [
+            Message(
+                msg_id=row[0],
+                execution_id=row[1],
+                workflow_id=row[2],
+                category=row[3],
+                type=row[4],
+                payload=pickle.loads(row[5]),
+            )
+            for row in cur.fetchall()
+        ]
+
+    def read_outbox(self, execution_id: str, after_msg_id: int = 0) -> list[Message]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """SELECT msg_id, execution_id, workflow_id, category, type, payload
+               FROM messages
+               WHERE execution_id = ? AND category = 'outbox' AND msg_id > ?
+               ORDER BY msg_id""",
+            (execution_id, after_msg_id),
+        )
+        return [
+            Message(
+                msg_id=row[0],
+                execution_id=row[1],
+                workflow_id=row[2],
+                category=row[3],
+                type=row[4],
+                payload=pickle.loads(row[5]),
+            )
+            for row in cur.fetchall()
+        ]
+
+    def list_executions(self) -> list[tuple[str, ExecutionState]]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT execution_id, state FROM executions ORDER BY execution_id")
+        return [(row[0], pickle.loads(row[1])) for row in cur.fetchall()]
 
     def close(self):
         self.conn.close()

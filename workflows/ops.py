@@ -113,6 +113,7 @@ class WorkflowHandle:
     workflow_name: str
     args: list
     storage: object = None
+    description: str = ''
 
     def __repr__(self):
         return f'<{self.workflow_name}#{self.id}>'
@@ -129,6 +130,7 @@ class WorkflowState:
     status: str = 'running'
     result: object = None
     send_val: object = field(default=None, repr=False)
+    description: str = ''
 
 @dataclass
 class HandlerState:
@@ -142,3 +144,4 @@ class ExecutionState:
     root_workflow_id: str
     source_file: str | None = None
     finished: bool = False
+    description: str = ''

@@ -13,25 +13,113 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function ExecList({ executions, currentId, onSelect }) {
+function ExecList({ executions, currentId, onSelect, onUpdateDescription }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => { if (editingId && inputRef.current) inputRef.current.focus(); }, [editingId]);
+
+  const startEdit = (e, exec) => {
+    e.stopPropagation();
+    setEditingId(exec.execution_id);
+    setEditValue(exec.description || '');
+  };
+  const saveEdit = (execId) => {
+    setEditingId(null);
+    onUpdateDescription(execId, editValue);
+  };
+
   return (
     <div className="space-y-1">
       {executions.map(e => {
         const active = e.execution_id === currentId;
-        const statusCls = e.finished ? 'bg-gray-100 text-gray-500' : 'bg-emerald-50 text-emerald-700';
-        const statusText = e.finished ? 'done' : 'running';
+        const statusCls = e.finished ? 'bg-gray-100 text-gray-500' : e.has_pending_prompts ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
+        const statusText = e.finished ? 'done' : e.has_pending_prompts ? 'input' : 'running';
+        const isEditing = editingId === e.execution_id;
         return (
-          <div key={e.execution_id}
-            className={`px-3 py-2 rounded-md cursor-pointer transition border ${active ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-100 border-transparent'}`}
-            onClick={() => onSelect(e.execution_id)}>
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-gray-800 text-sm">{e.workflow}</span>
-              <span className={`text-xs px-1.5 py-0.5 rounded ${statusCls}`}>{statusText}</span>
+          <div key={e.execution_id} className="flex items-start gap-1">
+            <div className="w-5 shrink-0 pt-2.5 text-center">
+              {active && !isEditing && (
+                <span className="cursor-pointer text-gray-300 hover:text-gray-600 text-xs" onClick={ev => startEdit(ev, e)}>&#9998;</span>
+              )}
             </div>
-            <div className="text-xs text-gray-400 mt-0.5 font-mono">{e.execution_id.substring(0, 12)}{e.created_at ? <span className="ml-2">{formatTime(e.created_at)}</span> : null}</div>
+            <div
+              className={`flex-1 min-w-0 px-3 py-2 rounded-md cursor-pointer transition border ${active ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-100 border-transparent'}`}
+              onClick={() => onSelect(e.execution_id)}>
+            <div className="flex items-start gap-1.5">
+              <div className="flex-1">
+                {isEditing ? (
+                  <input ref={inputRef} value={editValue} onChange={ev => setEditValue(ev.target.value)}
+                    onClick={ev => ev.stopPropagation()}
+                    onBlur={() => saveEdit(e.execution_id)}
+                    onKeyDown={ev => { if (ev.key === 'Enter') saveEdit(e.execution_id); if (ev.key === 'Escape') setEditingId(null); }}
+                    className="text-xs text-gray-600 border border-gray-300 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                ) : (
+                  <div className="text-sm font-medium text-gray-800">{e.description || '???'}</div>
+                )}
+                <div className="text-xs text-gray-400">{e.workflow}</div>
+              </div>
+              <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${statusCls}`}>{statusText}</span>
+            </div>
+            <div className="text-[10px] text-gray-300 mt-0.5 font-mono flex items-center gap-1.5 truncate">
+              <span>{e.execution_id.substring(0, 8)}</span>
+              {e.created_at ? <span>{formatTime(e.created_at)}</span> : null}
+              {e.total_cost > 0 && <span className="text-emerald-500">{formatCost(e.total_cost)}</span>}
+            </div>
+          </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function WorkflowTree({ exec, selectedWfId, onSelectWf }) {
+  if (!exec || !exec.workflows) return null;
+
+  const wfs = exec.workflows;
+  const rootId = exec.root_workflow_id;
+  const promptWfIds = new Set(exec.prompt_workflow_ids || []);
+
+  // Build children map
+  const children = {};
+  for (const [id, wf] of Object.entries(wfs)) {
+    const parent = wf.parent || null;
+    if (!children[parent]) children[parent] = [];
+    children[parent].push(id);
+  }
+
+  const renderNode = (id, depth = 0) => {
+    const wf = wfs[id];
+    if (!wf) return null;
+    const active = id === selectedWfId;
+    const awaiting = promptWfIds.has(id);
+    const statusColors = { running: 'text-emerald-600', waiting: 'text-amber-600', finished: 'text-gray-400' };
+    const statusDot = awaiting ? 'text-amber-500' : (statusColors[wf.status] || 'text-gray-400');
+    return (
+      <div key={id}>
+        <div
+          className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer text-xs ${active ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          onClick={() => onSelectWf(id)}>
+          <span className={`inline-block w-1.5 h-1.5 rounded-full ${statusDot} bg-current shrink-0 ${awaiting ? 'animate-pulse' : ''}`} />
+          <span className="font-medium truncate">{wf.name}</span>
+          {awaiting && <span className="text-amber-500 text-[10px] shrink-0">input</span>}
+          <span className="text-gray-400 font-mono ml-auto shrink-0">{id.substring(0, 6)}</span>
+        </div>
+        {wf.description && <div className="text-xs text-gray-400 truncate" style={{ paddingLeft: `${depth * 12 + 22}px` }}>{wf.description}</div>}
+        {(children[id] || []).map(cid => renderNode(cid, depth + 1))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Workflows</div>
+      {renderNode(rootId)}
+      {/* Render orphans (parent not in current state) */}
+      {Object.keys(wfs).filter(id => id !== rootId && !wfs[wfs[id].parent]).map(id => !children[wfs[id].parent]?.includes(id) ? null : null)}
     </div>
   );
 }
@@ -115,50 +203,39 @@ function formatDuration(s) {
   return (s / 60).toFixed(1) + 'm';
 }
 
-function UsageBadge({ usage }) {
-  const [expanded, setExpanded] = useState(false);
+function UsageSummary({ usage }) {
   const t = usage.total;
   const hasCache = t.cache_creation_input_tokens > 0 || t.cache_read_input_tokens > 0;
+  const b = 'bg-gray-100 text-gray-500 rounded px-1 py-0.5';
   return (
-    <div className="mt-1.5">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <span className="inline-flex items-center gap-1 bg-gray-100 rounded px-1.5 py-0.5">
-          <span className="text-gray-500">in</span> {t.input_tokens.toLocaleString()}
-        </span>
-        <span className="inline-flex items-center gap-1 bg-gray-100 rounded px-1.5 py-0.5">
-          <span className="text-gray-500">out</span> {t.output_tokens.toLocaleString()}
-        </span>
-        {hasCache && (
-          <span className="inline-flex items-center gap-1 bg-amber-50 rounded px-1.5 py-0.5 text-amber-600">
-            cache +{t.cache_creation_input_tokens.toLocaleString()} / hit {t.cache_read_input_tokens.toLocaleString()}
-          </span>
-        )}
-        {usage.cost > 0 && (
-          <span className="inline-flex items-center gap-1 bg-emerald-50 rounded px-1.5 py-0.5 text-emerald-600">
-            {formatCost(usage.cost)}
-          </span>
-        )}
-        {usage.turn_time > 0 && (
-          <span className="inline-flex items-center gap-1 bg-blue-50 rounded px-1.5 py-0.5 text-blue-500">
-            {formatDuration(usage.turn_time)}
-          </span>
-        )}
-        {usage.step_count > 1 && (
-          <span className="inline-flex items-center gap-1 bg-purple-50 rounded px-1.5 py-0.5 text-purple-500">
-            {usage.step_count} steps {usage.llm_time > 0 && `(${formatDuration(usage.llm_time)} llm)`}
-          </span>
-        )}
-        {usage.step_count > 1 && <span className="text-gray-300 select-none">{expanded ? '\u25BC' : '\u25B6'}</span>}
-      </div>
-      {expanded && usage.steps.length > 1 && (
-        <div className="mt-1 ml-2 space-y-0.5 text-xs text-gray-400 border-l-2 border-gray-100 pl-2">
+    <>
+      <span className={b}>in {t.input_tokens.toLocaleString()}</span>
+      <span className={b}>out {t.output_tokens.toLocaleString()}</span>
+      {hasCache && <span className={b}>cache +{t.cache_creation_input_tokens.toLocaleString()} hit {t.cache_read_input_tokens.toLocaleString()}</span>}
+      {usage.cost > 0 && <span className={b}>{formatCost(usage.cost)}</span>}
+      {usage.turn_time > 0 && <span className={b}>{formatDuration(usage.turn_time)}</span>}
+    </>
+  );
+}
+
+function UsageSteps({ usage }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!usage || usage.steps.length <= 1) return null;
+  const b = 'bg-gray-100 text-gray-500 rounded px-1 py-0.5';
+  return (
+    <div className="mt-1 text-xs text-gray-400">
+      <span className="cursor-pointer select-none" onClick={() => setExpanded(!expanded)}>
+        {expanded ? '\u25BC' : '\u25B6'} {usage.steps.length} steps {usage.llm_time > 0 && `(${formatDuration(usage.llm_time)} llm)`}
+      </span>
+      {expanded && (
+        <div className="mt-1 ml-2 space-y-0.5 border-l-2 border-gray-100 pl-2">
           {usage.steps.map((s, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-1.5">
-              <span className="text-gray-500 font-mono">{s.model}</span>
-              <span>in {s.input_tokens.toLocaleString()}</span>
-              <span>out {s.output_tokens.toLocaleString()}</span>
-              {s.cost > 0 && <span className="text-emerald-600">{formatCost(s.cost)}</span>}
-              {s.duration > 0 && <span className="text-blue-500">{formatDuration(s.duration)}</span>}
+            <div key={i} className="flex flex-wrap items-center gap-1">
+              <span className="text-gray-500">{s.model}</span>
+              <span className={b}>in {s.input_tokens.toLocaleString()}</span>
+              <span className={b}>out {s.output_tokens.toLocaleString()}</span>
+              {s.cost > 0 && <span className={b}>{formatCost(s.cost)}</span>}
+              {s.duration > 0 && <span className={b}>{formatDuration(s.duration)}</span>}
             </div>
           ))}
         </div>
@@ -193,13 +270,14 @@ function ChatMessage({ m, showAll }) {
         <div className="flex gap-3">
           <div className={`w-7 h-7 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-xs font-bold shrink-0 mt-0.5`}>{c.letter}</div>
           <div className="flex-1 min-w-0">
-            <div className={`text-xs font-medium ${c.text} mb-0.5`}>
+            <div className={`text-xs font-medium ${c.text} mb-0.5 flex flex-wrap items-center gap-1.5`}>
               {c.label}
-              {m.meta && m.meta.model && <span className="ml-2 text-gray-400 font-normal font-mono">{m.meta.model}</span>}
-              {m.created_at ? <span className="ml-2 text-gray-400 font-normal">{formatTime(m.created_at)}</span> : null}
+              {m.meta && m.meta.model && <span className="text-gray-400 font-normal">{m.meta.model}</span>}
+              {m.created_at ? <span className="text-gray-400 font-normal">{formatTime(m.created_at)}</span> : null}
+              {m.usage && <UsageSummary usage={m.usage} />}
             </div>
             {renderBody()}
-            {m.usage && <UsageBadge usage={m.usage} />}
+            {m.usage && <UsageSteps usage={m.usage} />}
           </div>
         </div>
       </div>
@@ -219,31 +297,39 @@ function ChatMessage({ m, showAll }) {
   );
 }
 
-function ChatView({ execId, exec, showAll }) {
+function ChatView({ execId, exec, showAll, selectedWfId }) {
   const [messages, setMessages] = useState([]);
   const areaRef = useRef(null);
   const prevLenRef = useRef(0);
 
+  const wfId = selectedWfId || (exec && exec.root_workflow_id);
+  const wf = exec && wfId ? exec.workflows[wfId] : null;
+
+  const convId = wf && wf.conversation_id;
+  const prevConvId = useRef(null);
+
   useEffect(() => {
-    if (!execId || !exec) { setMessages([]); prevLenRef.current = 0; return; }
-    const rootWf = exec.workflows[exec.root_workflow_id];
-    if (!rootWf || !rootWf.conversation_id) { setMessages([]); return; }
-    api(`/api/executions/${execId}/conversation/${rootWf.conversation_id}`)
+    if (!execId || !convId) { setMessages([]); prevLenRef.current = 0; prevConvId.current = null; return; }
+    if (convId !== prevConvId.current) {
+      setMessages([]);
+      prevLenRef.current = 0;
+      prevConvId.current = convId;
+    }
+    api(`/api/executions/${execId}/conversation/${convId}`)
       .then(setMessages)
       .catch(() => {});
-  }, [execId, exec]);
+  }, [execId, exec, convId]);
 
   useEffect(() => {
     const area = areaRef.current;
     if (!area) return;
     if (messages.length > prevLenRef.current) {
-      const wasAtBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 40;
-      if (wasAtBottom) requestAnimationFrame(() => { area.scrollTop = area.scrollHeight; });
+      requestAnimationFrame(() => { area.scrollTop = area.scrollHeight; });
     }
     prevLenRef.current = messages.length;
   }, [messages]);
 
-  const rootWf = exec ? exec.workflows[exec.root_workflow_id] : null;
+  const displayWf = wf;
 
   return (
     <div ref={areaRef} className="chat-area bg-white border border-gray-200 rounded-lg overflow-y-auto p-4 space-y-3" style={{ maxHeight: '60vh' }}>
@@ -253,9 +339,9 @@ function ChatView({ execId, exec, showAll }) {
       {messages.map((m, i) => (
         <ChatMessage key={m.message_id || i} m={m} showAll={showAll} />
       ))}
-      {exec && exec.finished && (
+      {displayWf && displayWf.status === 'finished' && (
         <div className="text-center py-3 text-emerald-600 text-xs font-medium border-t border-gray-100 mt-2 pt-3">
-          Done{rootWf && rootWf.result ? ': ' + rootWf.result : ''}
+          Done{displayWf.result ? ': ' + displayWf.result : ''}
         </div>
       )}
     </div>
@@ -373,7 +459,7 @@ function StatusView({ exec }) {
   );
 }
 
-function PromptInput({ execId, onSent }) {
+function PromptInput({ execId, exec, onSent }) {
   const [prompts, setPrompts] = useState([]);
   const [value, setValue] = useState('');
   const [sending, setSending] = useState(false);
@@ -382,14 +468,18 @@ function PromptInput({ execId, onSent }) {
   useEffect(() => {
     if (!execId) { setPrompts([]); return; }
     api(`/api/executions/${execId}/prompts`).then(setPrompts).catch(() => {});
-  }, [execId]);
+  }, [execId, exec]);
 
   const pending = prompts.length > 0 ? prompts[0] : null;
+  const prevPendingId = useRef(null);
+  const disabled = !pending || sending;
 
   useEffect(() => {
-    if (pending && inputRef.current && document.activeElement !== inputRef.current) {
-      inputRef.current.focus();
+    if (pending && pending.request_id !== prevPendingId.current) {
+      prevPendingId.current = pending.request_id;
+      if (inputRef.current) inputRef.current.focus();
     }
+    if (!pending) prevPendingId.current = null;
   }, [pending]);
 
   const send = async () => {
@@ -407,15 +497,14 @@ function PromptInput({ execId, onSent }) {
     } finally { setSending(false); }
   };
 
-  if (!pending) return null;
-
   return (
     <div className="mt-2 flex gap-2">
       <input ref={inputRef} value={value} onChange={e => setValue(e.target.value)}
+        disabled={disabled}
         onKeyDown={e => { if (e.key === 'Enter') send(); }}
-        className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-        placeholder="Type your response..." />
-      <button onClick={send} disabled={sending}
+        className={`flex-1 border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-gray-50 border-gray-200 text-gray-400' : 'bg-white border-gray-300'}`}
+        placeholder={pending ? 'Type your response...' : 'Waiting...'} />
+      <button onClick={send} disabled={disabled}
         className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
         {sending ? '...' : 'Send'}
       </button>
@@ -448,6 +537,7 @@ export default function App() {
   const [executions, setExecutions] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [exec, setExec] = useState(null);
+  const [selectedWfId, setSelectedWfId] = useState(null);
   const [tab, setTab] = useState('chat');
   const [showAll, setShowAll] = useState(false);
   const [target, setTarget] = useState('');
@@ -485,7 +575,7 @@ export default function App() {
 
   const selectExec = useCallback((id) => {
     setCurrentId(id);
-    setExec(null);
+    setSelectedWfId(null);
   }, []);
 
   const startExec = async () => {
@@ -523,7 +613,14 @@ export default function App() {
         {/* Sidebar */}
         <div className="w-64 shrink-0">
           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Executions</div>
-          <ExecList executions={executions} currentId={currentId} onSelect={selectExec} />
+          <ExecList executions={executions} currentId={currentId} onSelect={selectExec}
+            onUpdateDescription={async (eid, desc) => {
+              await api(`/api/executions/${eid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: desc }) });
+              refresh(); refreshExec();
+            }} />
+          {exec && currentId && (
+            <WorkflowTree exec={exec} selectedWfId={selectedWfId || exec.root_workflow_id} onSelectWf={setSelectedWfId} />
+          )}
         </div>
 
         {/* Main */}
@@ -536,14 +633,17 @@ export default function App() {
             </div>
             <div className="flex items-center gap-3">
               {tab === 'chat' && <Toggle checked={showAll} onChange={setShowAll} label="Details" />}
+              {exec && exec.total_cost > 0 && (
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-mono">{formatCost(exec.total_cost)}</span>
+              )}
               <StatusBadge exec={exec} />
             </div>
           </div>
 
           {tab === 'chat' && (
             <div>
-              <ChatView execId={currentId} exec={exec} showAll={showAll} />
-              <PromptInput execId={currentId} onSent={() => { refresh(); refreshExec(); }} />
+              <ChatView execId={currentId} exec={exec} showAll={showAll} selectedWfId={selectedWfId} />
+              <PromptInput execId={currentId} exec={exec} onSent={() => { refresh(); refreshExec(); }} />
             </div>
           )}
           {tab === 'events' && <EventsView execId={currentId} exec={exec} />}

@@ -235,6 +235,7 @@ class Engine:
             name=handle.workflow_name,
             args=list(handle.args),
             parent_workflow_id=parent_workflow_id,
+            description=getattr(handle, 'description', ''),
         )
 
         if parent_wf and parent_wf.workdir:

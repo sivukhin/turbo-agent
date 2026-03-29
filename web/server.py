@@ -90,13 +90,18 @@ def _engine_for_execution(store, execution_id):
 
 
 def _has_pending_prompts(store, execution_id):
+    return len(_pending_prompt_workflow_ids(store, execution_id)) > 0
+
+
+def _pending_prompt_workflow_ids(store, execution_id):
     outbox = store.read_outbox(execution_id)
     inbox = store.read_inbox(execution_id)
     answered = {e.payload.request_id for e in inbox if isinstance(e.payload, UserPromptResult)}
+    wf_ids = set()
     for e in outbox:
         if isinstance(e.payload, UserPromptRequest) and e.payload.request_id not in answered:
-            return True
-    return False
+            wf_ids.add(e.workflow_id)
+    return wf_ids
 
 
 def _worker_loop(execution_id: str, trigger: threading.Event):
@@ -157,19 +162,36 @@ def _wake_worker(execution_id: str):
 
 # ---- API ----
 
+def _execution_total_cost(store, execution_id):
+    events = store.read_all_events(execution_id)
+    cost = 0.0
+    for e in events:
+        if isinstance(e.payload, LlmResponse) and e.payload.usage:
+            cost += _compute_step_cost(e.payload.usage, e.payload.model)
+    return round(cost, 6)
+
+
 @app.get('/api/executions')
 def list_executions():
     store = _store()
     execs = store.list_executions()
+    result = []
+    for eid, state, created_at in execs:
+        cost = _execution_total_cost(store, eid)
+        has_prompts = _has_pending_prompts(store, eid)
+        result.append({
+            'execution_id': eid,
+            'workflow': state.workflows[state.root_workflow_id].name,
+            'workflows_count': len(state.workflows),
+            'finished': state.finished,
+            'running_bg': eid in _workers,
+            'created_at': created_at,
+            'total_cost': cost,
+            'description': getattr(state, 'description', ''),
+            'has_pending_prompts': has_prompts,
+        })
     store.close()
-    return [{
-        'execution_id': eid,
-        'workflow': state.workflows[state.root_workflow_id].name,
-        'workflows_count': len(state.workflows),
-        'finished': state.finished,
-        'running_bg': eid in _workers,
-        'created_at': created_at,
-    } for eid, state, created_at in execs]
+    return result
 
 
 @app.get('/api/executions/{execution_id}')
@@ -182,7 +204,17 @@ def get_execution(execution_id: str):
         raise HTTPException(404, 'Execution not found')
 
     has_prompts = _has_pending_prompts(store, execution_id)
+    prompt_wf_ids = _pending_prompt_workflow_ids(store, execution_id)
     created_at = store.get_created_at(execution_id)
+    all_events = store.read_all_events(execution_id)
+    total_cost = 0.0
+    total_tokens = {'input_tokens': 0, 'output_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0}
+    for e in all_events:
+        if isinstance(e.payload, LlmResponse) and e.payload.usage:
+            u = e.payload.usage
+            total_cost += _compute_step_cost(u, e.payload.model)
+            for k in total_tokens:
+                total_tokens[k] += u.get(k, 0)
     store.close()
 
     workflows = {}
@@ -193,6 +225,7 @@ def get_execution(execution_id: str):
             'parent': wf.parent_workflow_id,
             'result': repr(wf.result) if wf.result is not None else None,
             'conversation_id': wf.conversation_id,
+            'description': getattr(wf, 'description', ''),
         }
     return {
         'execution_id': execution_id,
@@ -200,11 +233,15 @@ def get_execution(execution_id: str):
         'finished': state.finished,
         'last_event': last_event,
         'source_file': state.source_file,
+        'description': getattr(state, 'description', ''),
         'workflows': workflows,
         'handlers': {k: {'type': v.handler_type} for k, v in state.handlers.items()},
         'has_pending_prompts': has_prompts,
+        'prompt_workflow_ids': list(prompt_wf_ids),
         'running_bg': execution_id in _workers,
         'created_at': created_at,
+        'total_cost': round(total_cost, 6),
+        'total_tokens': total_tokens,
     }
 
 
@@ -375,6 +412,24 @@ def answer_prompt(execution_id: str, answer: PromptAnswer):
 
     # Resume background execution
     _ensure_worker(execution_id)
+    return {'ok': True}
+
+
+class UpdateDescription(BaseModel):
+    description: str
+
+
+@app.patch('/api/executions/{execution_id}')
+def update_execution(execution_id: str, body: UpdateDescription):
+    store = _store()
+    try:
+        state, _ = store.load_state(execution_id)
+    except KeyError:
+        store.close()
+        raise HTTPException(404, 'Execution not found')
+    state.description = body.description
+    store.save_state(execution_id, state)
+    store.close()
     return {'ok': True}
 
 

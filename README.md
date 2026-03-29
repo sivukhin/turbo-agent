@@ -54,6 +54,91 @@ def parent():
     result = yield wait(child)
 ```
 
+## How the bytecode hack works
+
+The `@workflow` decorator rewrites the generator's bytecode at import time to make it checkpointable. This is the core trick that makes durable execution possible with plain Python syntax -- no DSL, no code generation, just regular generators.
+
+### The problem
+
+Python generators have internal state (local variables, instruction pointer, evaluation stack) that isn't normally accessible or serializable. When a generator yields, CPython suspends it with all state on the C stack. You can't pickle a generator.
+
+### The solution: sentinel + drain/restore
+
+The decorator rewrites every `YIELD_VALUE` instruction to:
+
+1. **Drain the stack**: Before yielding, pop everything off the evaluation stack into a list (`__drain__`). A sentinel value pushed at generator start marks the stack bottom -- the drain loop pops until it hits the sentinel.
+
+2. **Save state**: Store the yield index (`__yield_idx__`), drained stack (`__drain__`), yielded value (`__yv__`), and all local variables. This is the checkpoint -- a plain dict that can be pickled.
+
+3. **Restore on resume**: When resuming from a checkpoint, the decorator injects a jump table at the top of the function. It restores locals from the checkpoint, pushes the saved stack values back (using `FOR_ITER` + `SWAP` to grow the stack dynamically), and jumps to the right yield point.
+
+```
+Normal execution:              Checkpoint/Resume:
+
+  push sentinel                  push sentinel
+  ... normal code ...            restore locals from checkpoint
+  [at yield N]:                  jump to yield N label
+    drain stack to list          [at yield N]:
+    save yield_idx, drain,         restore stack from drain list
+      locals                       resume with send value
+    restore stack from list
+    yield value
+```
+
+The `FOR_ITER` + `SWAP` trick is key -- it lets us push an arbitrary number of values onto the stack at resume time, which CPython doesn't normally allow (the stack depth is fixed at compile time). We set `co_stacksize=100` to give enough headroom.
+
+### Dual behavior of `@workflow`
+
+A `@workflow` function behaves differently depending on context:
+
+- **Called at top level**: Returns a `DurableGenerator` that can be iterated, checkpointed, and resumed.
+- **Called inside another `@workflow`** (during an engine tick): Doesn't execute -- instead registers a child workflow via `contextvars` and returns a `WorkflowHandle`. The engine manages the child's lifecycle.
+
+This means the same function call syntax (`child_workflow(args)`) either starts a concurrent child or creates a local generator, depending on whether the engine is driving execution.
+
+### What the rewritten bytecode looks like
+
+For a simple workflow:
+
+```python
+@workflow
+def example(x):
+    a = yield x + 1
+    b = yield a + 2
+    return b
+```
+
+The decorator produces (conceptually):
+
+```python
+def example(__checkpoint__, x):
+    if __checkpoint__ is not None:
+        __resume_idx__, __drain__, __yv__, locals = unpack(__checkpoint__)
+        x, a, b = locals['x'], locals['a'], locals['b']
+        # restore stack, jump to yield point
+        if __resume_idx__ == 0: goto yield_0
+        if __resume_idx__ == 1: goto yield_1
+
+    SENTINEL  # mark stack bottom
+    # ... original code with yield points wrapped ...
+
+yield_0:
+    __drain__ = drain_stack_until(SENTINEL)
+    __yield_idx__ = 0
+    restore_stack(__drain__)
+    a = yield (x + 1)
+
+yield_1:
+    __drain__ = drain_stack_until(SENTINEL)
+    __yield_idx__ = 1
+    restore_stack(__drain__)
+    b = yield (a + 2)
+
+    return b
+```
+
+The actual implementation operates on raw CPython bytecode instructions via the `bytecode` library, handling `LOAD_FAST`, `STORE_FAST`, `YIELD_VALUE`, control flow labels, and stack manipulation opcodes directly.
+
 ## Event sourcing
 
 All operations go through the event log: the engine emits an outbox event (request), an event handler does the work and emits an inbox event (result), and the workflow resumes.

@@ -3,7 +3,7 @@
 import pytest
 from workflows import (
     workflow, wait, conv_append, conv_read, conv_search,
-    conv_get, conv_replace_with, llm, Latest, Engine, Store,
+    conv_get, conv_replace_with, llm, Latest, Engine, EngineConfig, Store,
 )
 from workflows.conversation import MessageRef, ConversationMessage
 
@@ -220,7 +220,7 @@ def run_to_completion(engine, store, eid, max_steps=50):
 class TestConversationEngine:
     def test_append_and_read(self):
         store = Store(':memory:')
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'chat_workflow', [])
         state = run_to_completion(engine, store, eid)
         assert state.finished
@@ -228,7 +228,7 @@ class TestConversationEngine:
 
     def test_search(self):
         store = Store(':memory:')
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'search_workflow', [])
         state = run_to_completion(engine, store, eid)
         assert state.finished
@@ -236,7 +236,7 @@ class TestConversationEngine:
 
     def test_replace(self):
         store = Store(':memory:')
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'replace_workflow', [])
         state = run_to_completion(engine, store, eid)
         assert state.finished
@@ -244,7 +244,7 @@ class TestConversationEngine:
 
     def test_child_sees_parent_conversation(self):
         store = Store(':memory:')
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'parent_with_conv', [])
         state = run_to_completion(engine, store, eid)
         assert state.finished
@@ -253,7 +253,7 @@ class TestConversationEngine:
 
     def test_conversation_events_in_log(self):
         store = Store(':memory:')
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'chat_workflow', [])
         run_to_completion(engine, store, eid)
         outbox = store.read_outbox(eid)

@@ -41,11 +41,6 @@ class Engine:
     def __init__(self, config: EngineConfig):
         self.config = config
 
-    @classmethod
-    def from_registry(cls, workflows_registry: dict, **kwargs):
-        """Convenience: create engine from just a workflow registry."""
-        return cls(EngineConfig(workflows_registry=workflows_registry, **kwargs))
-
     def start(self, store, workflow_name, args, now=None, source_file=None,
               workdir=None) -> str:
         now = now if now is not None else time.time()
@@ -93,30 +88,32 @@ class Engine:
                 for e in new_events
             ])
 
-        self._process_events(store, execution_id, now)
+        while self._process_events(store, execution_id, now):
+            pass
 
     def _process_events(self, store, execution_id, now):
-        """Process all unprocessed events until stable."""
-        while True:
-            state, last_processed = store.load_state(execution_id)
-            all_events = store.read_all_events(execution_id, after_event_id=last_processed)
-            if not all_events:
-                break
+        """Process one batch of unprocessed events. Returns True if any were processed."""
+        state, last_processed = store.load_state(execution_id)
+        all_events = store.read_all_events(execution_id, after_event_id=last_processed)
+        if not all_events:
+            return False
 
-            new_events = self._dispatch_events(all_events, state, store)
+        new_events = self._dispatch_events(all_events, state, store)
 
-            self._resolve_workflow_handlers(state, now)
-            self._check_finished(state)
-            self._prune_finished(state)
+        self._resolve_workflow_handlers(state, now)
+        self._check_finished(state)
+        self._prune_finished(state)
 
-            last_event_id = all_events[-1].event_id
-            store.save_state(execution_id, state, last_processed_event_id=last_event_id)
+        last_event_id = all_events[-1].event_id
+        store.save_state(execution_id, state, last_processed_event_id=last_event_id)
 
-            if new_events:
-                store.append_events([
-                    (e.execution_id, e.workflow_id, e.category, e.payload)
-                    for e in new_events
-                ])
+        if new_events:
+            store.append_events([
+                (e.execution_id, e.workflow_id, e.category, e.payload)
+                for e in new_events
+            ])
+
+        return True
 
     def _dispatch_events(self, events, state, store):
         """Dispatch events to global and workflow handlers. Returns new events."""

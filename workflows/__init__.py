@@ -4,7 +4,7 @@ from workflows.ops import (
     WaitOp, SleepOp, ShellOp, ReadFileOp, WriteFileOp, LlmOp,
     wait, wait_all, wait_any, sleep, shell, read_file, write_file, llm,
 )
-from workflows.engine import Engine
+from workflows.engine import Engine, EngineConfig
 from workflows.conversation import (
     ConversationRef, ConversationMessage, MessageRef, Latest,
     conv_append, conv_read, conv_search, conv_get, conv_replace_with,

@@ -1,5 +1,5 @@
 import pytest
-from workflows import workflow, wait, wait_all, wait_any, Engine, Store
+from workflows import workflow, wait, wait_all, wait_any, Engine, EngineConfig, Store
 from workflows.events import WorkflowFinished, WorkflowYielded
 
 
@@ -44,7 +44,7 @@ def run_to_completion(engine, store, eid, max_steps=100):
 @pytest.fixture
 def env():
     store = Store(':memory:')
-    engine = Engine.from_registry(REGISTRY)
+    engine = Engine(EngineConfig(workflows_registry=REGISTRY))
     return engine, store
 
 
@@ -137,13 +137,13 @@ class TestStoreOnDisk:
     def test_file_persistence(self, tmp_path):
         db_path = str(tmp_path / 'test.db')
         store = Store(db_path)
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'counter', [5])
         engine.step(store, eid)
         store.close()
 
         store2 = Store(db_path)
-        engine2 = Engine.from_registry(REGISTRY)
+        engine2 = Engine(EngineConfig(workflows_registry=REGISTRY))
         state = run_to_completion(engine2, store2, eid)
         assert state.finished
         assert state.workflows[state.root_workflow_id].result == 5
@@ -152,7 +152,7 @@ class TestStoreOnDisk:
     def test_multiple_executions(self, tmp_path):
         db_path = str(tmp_path / 'multi.db')
         store = Store(db_path)
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid1 = engine.start(store, 'counter', [3])
         eid2 = engine.start(store, 'counter', [5])
         store.close()

@@ -1,6 +1,6 @@
 import pickle
 import pytest
-from workflows import workflow, wait, wait_all, wait_any, sleep, Engine, Store
+from workflows import workflow, wait, wait_all, wait_any, sleep, Engine, EngineConfig, Store
 
 
 # ---- test workflows ----
@@ -243,7 +243,7 @@ def run_to_completion(engine, store, execution_id, max_steps=100):
 @pytest.fixture
 def env():
     store = Store(':memory:')
-    engine = Engine.from_registry(REGISTRY)
+    engine = Engine(EngineConfig(workflows_registry=REGISTRY))
     return engine, store
 
 
@@ -410,7 +410,7 @@ class TestWaitAny:
             return results
 
         reg = {**REGISTRY, 'any_raw': any_raw}
-        engine = Engine.from_registry(reg)
+        engine = Engine(EngineConfig(workflows_registry=reg))
         store = env[1]
         eid = engine.start(store, 'any_raw', [])
         state = run_to_completion(engine, store, eid)
@@ -435,7 +435,7 @@ class TestWaitAny:
             return results
 
         reg = {**REGISTRY, 'any_check': any_check}
-        engine = Engine.from_registry(reg)
+        engine = Engine(EngineConfig(workflows_registry=reg))
         store = env[1]
         eid = engine.start(store, 'any_check', [])
         # Only step a few times — fast finishes but slow shouldn't
@@ -470,7 +470,7 @@ class TestWaitAny:
             return results
 
         reg = {**REGISTRY, 'tie': tie}
-        engine = Engine.from_registry(reg)
+        engine = Engine(EngineConfig(workflows_registry=reg))
         store = env[1]
         eid = engine.start(store, 'tie', [])
         state = run_to_completion(engine, store, eid)
@@ -494,7 +494,7 @@ class TestWaitAny:
             return results
 
         reg = {**REGISTRY, 'single_any': single_any}
-        engine = Engine.from_registry(reg)
+        engine = Engine(EngineConfig(workflows_registry=reg))
         store = env[1]
         eid = engine.start(store, 'single_any', [])
         state = run_to_completion(engine, store, eid)
@@ -512,7 +512,7 @@ class TestWaitAny:
             return results
 
         reg = {**REGISTRY, 'ordered_any': ordered_any}
-        engine = Engine.from_registry(reg)
+        engine = Engine(EngineConfig(workflows_registry=reg))
         store = env[1]
         eid = engine.start(store, 'ordered_any', [])
         state = run_to_completion(engine, store, eid)
@@ -618,7 +618,7 @@ class TestCheckpointResume:
         engine.step(store, eid)
 
         # Simulate restart: create new engine
-        engine2 = Engine.from_registry(REGISTRY)
+        engine2 = Engine(EngineConfig(workflows_registry=REGISTRY))
         run_to_completion(engine2, store, eid)
         state, _ = store.load_state(eid)
         assert state.finished
@@ -627,14 +627,14 @@ class TestCheckpointResume:
     def test_on_disk_persistence(self, tmp_path):
         db_path = str(tmp_path / 'test.db')
         store = Store(db_path)
-        engine = Engine.from_registry(REGISTRY)
+        engine = Engine(EngineConfig(workflows_registry=REGISTRY))
         eid = engine.start(store, 'counter', [5])
         engine.step(store, eid)
         store.close()
 
         # Reopen
         store2 = Store(db_path)
-        engine2 = Engine.from_registry(REGISTRY)
+        engine2 = Engine(EngineConfig(workflows_registry=REGISTRY))
         run_to_completion(engine2, store2, eid)
         state, _ = store2.load_state(eid)
         assert state.finished
@@ -756,7 +756,7 @@ class TestSleep:
             return 'done'
 
         reg = {**REGISTRY, 'instant_sleep': instant_sleep}
-        engine = Engine.from_registry(reg)
+        engine = Engine(EngineConfig(workflows_registry=reg))
         store = env[1]
         eid = engine.start(store, 'instant_sleep', [], now=100.0)
         engine.step(store, eid, now=100.0)  # sleep(0) → resolves immediately

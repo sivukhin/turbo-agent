@@ -9,10 +9,12 @@ from rich.text import Text
 from rich.tree import Tree
 
 from workflows import Engine, EngineConfig, Store, load_workflows_from_file
+from workflows.tasks import TaskStore
 import workflows.events as ev
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'executions.db')
+TASKS_DB_PATH = os.path.join(os.path.dirname(__file__), 'tasks.db')
 console = Console()
 
 
@@ -422,11 +424,18 @@ def cmd_conv(args):
             _print_conversation(store, conv_id, wf_name, wf_id)
             console.print()
     else:
-        # Show all conversations: active workflows + all from conversation_refs
-        cur = store.conn.cursor()
-        cur.execute("SELECT conversation_id FROM conversation_refs ORDER BY conversation_id")
-        all_convs = [row[0] for row in cur.fetchall()]
-        for conv_id in all_convs:
+        # Show conversations belonging to this execution's workflows
+        conv_ids = set()
+        for wf in state.workflows.values():
+            if wf.conversation_id:
+                conv_ids.add(wf.conversation_id)
+        # Also find conversations from pruned workflows via events
+        from workflows.events import ConvAppendRequest
+        outbox = store.read_outbox(args.id)
+        for event in outbox:
+            if isinstance(event.payload, ConvAppendRequest):
+                conv_ids.add(event.payload.conversation_id)
+        for conv_id in sorted(conv_ids):
             wf_name, wf_id = _find_conv_owner(state, store, args.id, conv_id)
             _print_conversation(store, conv_id, wf_name, wf_id)
             console.print()
@@ -626,7 +635,7 @@ def cmd_list(args):
     table.add_column('workflows', justify='right')
     table.add_column('status')
 
-    for exec_id, state in all_execs:
+    for exec_id, state, _created_at in all_execs:
         n_wf = len(state.workflows)
         root_name = state.workflows[state.root_workflow_id].name
         if state.finished:
@@ -636,6 +645,84 @@ def cmd_list(args):
         table.add_row(exec_id, root_name, str(n_wf), status)
 
     console.print(table)
+
+
+def cmd_task(args):
+    ts = TaskStore(TASKS_DB_PATH)
+    action = args.task_action
+
+    if action == 'create':
+        labels = {}
+        if args.label:
+            for l in args.label:
+                k, _, v = l.partition('=')
+                labels[k] = v
+        task = ts.create(
+            name=args.name, description=args.description or '',
+            labels=labels, color=args.color or '',
+        )
+        console.print(f'[bold green]Created[/] [cyan]{task["task_id"]}[/] {task["name"]}')
+
+    elif action == 'list':
+        tasks = ts.list()
+        if not tasks:
+            console.print('[dim]No tasks yet.[/]')
+            ts.close()
+            return
+        table = Table(show_lines=False)
+        table.add_column('task_id', style='cyan')
+        table.add_column('name')
+        table.add_column('status')
+        table.add_column('description', style='dim')
+        table.add_column('labels', style='dim')
+        for t in tasks:
+            labels_str = ', '.join(f'{k}={v}' for k, v in t['labels'].items()) if t['labels'] else ''
+            status_style = 'green' if t['status'] == 'pending' else 'dim'
+            status_text = t['status']
+            if t['needs_input']:
+                status_text += ' [amber]input[/]'
+            table.add_row(
+                t['task_id'][:12], t['name'],
+                Text(status_text, style=status_style),
+                t['description'][:40] if t['description'] else '',
+                labels_str,
+            )
+        console.print(table)
+
+    elif action == 'show':
+        task = ts.find_by_prefix(args.id)
+        for k, v in task.items():
+            console.print(f'  [bold]{k}[/]: {v}')
+
+    elif action == 'update':
+        kwargs = {}
+        if args.name is not None:
+            kwargs['name'] = args.name
+        if args.description is not None:
+            kwargs['description'] = args.description
+        if args.color is not None:
+            kwargs['color'] = args.color
+        if getattr(args, 'status', None) is not None:
+            kwargs['status'] = args.status
+        if args.label:
+            task = ts.find_by_prefix(args.id)
+            labels = dict(task['labels'])
+            for l in args.label:
+                k, _, v = l.partition('=')
+                if v == '':
+                    labels.pop(k, None)
+                else:
+                    labels[k] = v
+            kwargs['labels'] = labels
+        task = ts.update(ts.find_by_prefix(args.id)['task_id'], **kwargs)
+        console.print(f'[bold green]Updated[/] [cyan]{task["task_id"][:12]}[/] {task["name"]}')
+
+    elif action == 'delete':
+        task = ts.find_by_prefix(args.id)
+        ts.delete(task['task_id'])
+        console.print(f'[bold red]Deleted[/] [cyan]{task["task_id"][:12]}[/] {task["name"]}')
+
+    ts.close()
 
 
 def main():
@@ -677,6 +764,31 @@ def main():
 
     sub.add_parser('list', help='List all executions')
 
+    p_task = sub.add_parser('task', help='Manage tasks')
+    task_sub = p_task.add_subparsers(dest='task_action', required=True)
+
+    p_tc = task_sub.add_parser('create', help='Create a task')
+    p_tc.add_argument('name', help='Task name')
+    p_tc.add_argument('-d', '--description', help='Description')
+    p_tc.add_argument('-l', '--label', action='append', help='Label as key=value')
+    p_tc.add_argument('--color', help='Color')
+
+    task_sub.add_parser('list', help='List all tasks')
+
+    p_ts = task_sub.add_parser('show', help='Show task details')
+    p_ts.add_argument('id', help='Task ID or prefix')
+
+    p_tu = task_sub.add_parser('update', help='Update a task')
+    p_tu.add_argument('id', help='Task ID or prefix')
+    p_tu.add_argument('-n', '--name', help='New name')
+    p_tu.add_argument('-d', '--description', help='New description')
+    p_tu.add_argument('-s', '--status', choices=['pending', 'finished'], help='Status')
+    p_tu.add_argument('-l', '--label', action='append', help='Set label key=value (empty value removes)')
+    p_tu.add_argument('--color', help='Color')
+
+    p_td = task_sub.add_parser('delete', help='Delete a task')
+    p_td.add_argument('id', help='Task ID or prefix')
+
     p_web = sub.add_parser('web', help='Start the web UI')
     p_web.add_argument('--port', type=int, default=8080, help='Port (default: 8080)')
     p_web.add_argument('--host', default='0.0.0.0', help='Host (default: 0.0.0.0)')
@@ -686,7 +798,7 @@ def main():
         'start': cmd_start, 'step': cmd_step, 'status': cmd_status,
         'events': cmd_events, 'inspect': cmd_inspect, 'conv': cmd_conv,
         'run': cmd_run, 'continue': cmd_continue, 'list': cmd_list,
-        'web': cmd_web,
+        'task': cmd_task, 'web': cmd_web,
     }
     cmds[args.command](args)
 

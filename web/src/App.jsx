@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Markdown from 'react-markdown';
+import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation, Link } from 'react-router-dom';
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -297,7 +298,7 @@ function ChatMessage({ m, showAll }) {
   );
 }
 
-function ChatView({ execId, exec, showAll, selectedWfId }) {
+function ChatView({ execId, exec, showAll, selectedWfId, apiBase }) {
   const [messages, setMessages] = useState([]);
   const areaRef = useRef(null);
   const prevLenRef = useRef(0);
@@ -315,7 +316,7 @@ function ChatView({ execId, exec, showAll, selectedWfId }) {
       prevLenRef.current = 0;
       prevConvId.current = convId;
     }
-    api(`/api/executions/${execId}/conversation/${convId}`)
+    api(`${apiBase}/executions/${execId}/conversation/${convId}`)
       .then(setMessages)
       .catch(() => { });
   }, [execId, exec, convId]);
@@ -424,14 +425,14 @@ function EventRow({ e }) {
   );
 }
 
-function EventsView({ execId, exec }) {
+function EventsView({ execId, exec, apiBase }) {
   const [events, setEvents] = useState([]);
   const areaRef = useRef(null);
   const prevLenRef = useRef(0);
 
   useEffect(() => {
     if (!execId) { setEvents([]); prevLenRef.current = 0; return; }
-    api(`/api/executions/${execId}/events`).then(setEvents).catch(() => { });
+    api(`${apiBase}/executions/${execId}/events`).then(setEvents).catch(() => { });
   }, [execId, exec]);
 
   useEffect(() => {
@@ -459,7 +460,7 @@ function StatusView({ exec }) {
   );
 }
 
-function PromptInput({ execId, exec, onSent }) {
+function PromptInput({ execId, exec, onSent, apiBase }) {
   const [prompts, setPrompts] = useState([]);
   const [value, setValue] = useState('');
   const [sending, setSending] = useState(false);
@@ -467,7 +468,7 @@ function PromptInput({ execId, exec, onSent }) {
 
   useEffect(() => {
     if (!execId) { setPrompts([]); return; }
-    api(`/api/executions/${execId}/prompts`).then(setPrompts).catch(() => { });
+    api(`${apiBase}/executions/${execId}/prompts`).then(setPrompts).catch(() => { });
   }, [execId, exec]);
 
   const pending = prompts.length > 0 ? prompts[0] : null;
@@ -486,7 +487,7 @@ function PromptInput({ execId, exec, onSent }) {
     if (!pending || !value.trim() || sending) return;
     setSending(true);
     try {
-      await api(`/api/executions/${execId}/answer`, {
+      await api(`${apiBase}/executions/${execId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request_id: pending.request_id, response: value }),
@@ -533,40 +534,425 @@ function Toggle({ checked, onChange, label }) {
   );
 }
 
-export default function App() {
+function TaskCard({ task }) {
+  const isPending = task.status === 'pending';
+  const borderColor = task.color ? { borderLeftColor: task.color } : {};
+  return (
+    <div className={`border rounded-lg p-3 bg-white border-l-4 ${isPending ? 'border-l-blue-400' : 'border-l-gray-300'}`} style={borderColor}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium text-gray-800 text-sm">{task.name}</div>
+          {task.description && <div className="text-xs text-gray-400 mt-0.5 line-clamp-2">{task.description}</div>}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {task.needs_input && <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 animate-pulse">input</span>}
+          <span className={`text-xs px-1.5 py-0.5 rounded ${isPending ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+            {task.status}
+          </span>
+        </div>
+      </div>
+      {Object.entries(task.labels).filter(([k]) => k !== 'project').length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {Object.entries(task.labels).filter(([k]) => k !== 'project').map(([k, v]) => (
+            <span key={k} className="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">
+              {v || k}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="text-[10px] text-gray-300 mt-1.5 font-mono">{task.task_id.substring(0, 8)}</div>
+    </div>
+  );
+}
+
+function CreateProjectModal({ onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const inputRef = useRef(null);
+  useEffect(() => { if (inputRef.current) inputRef.current.focus(); }, []);
+  const submit = async () => {
+    if (!name.trim()) return;
+    await api('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    onCreated();
+  };
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-lg w-80 p-4" onClick={e => e.stopPropagation()}>
+        <div className="text-sm font-semibold text-gray-800 mb-3">New project</div>
+        <input ref={inputRef} value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onClose(); }}
+          className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 mb-3"
+          placeholder="Project name" />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 px-3 py-1 rounded text-xs">Cancel</button>
+          <button onClick={submit} disabled={!name.trim()}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded text-xs font-medium transition disabled:opacity-50">Create</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateTaskModal({ project, onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const nameRef = useRef(null);
+
+  useEffect(() => { if (nameRef.current) nameRef.current.focus(); }, []);
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    const labels = project ? { project } : {};
+    const task = await api('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description, labels }),
+    });
+    onCreated(task);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-lg w-96 p-4" onClick={e => e.stopPropagation()}>
+        <div className="text-sm font-semibold text-gray-800 mb-3">
+          New task{project ? <span className="text-gray-400 font-normal"> in {project}</span> : ''}
+        </div>
+        <input ref={nameRef} value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && name.trim()) submit(); if (e.key === 'Escape') onClose(); }}
+          className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 mb-2"
+          placeholder="Task name" />
+        <textarea value={description} onChange={e => setDescription(e.target.value)}
+          rows={3}
+          onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+          className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 mb-3 resize-y"
+          placeholder="Description (optional)" />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 px-3 py-1 rounded text-xs">Cancel</button>
+          <button onClick={submit} disabled={!name.trim()}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded text-xs font-medium transition disabled:opacity-50">Create</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TasksView({ setModalProject, refreshKey }) {
+  const [tasks, setTasks] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [editingProject, setEditingProject] = useState(null);
+  const [editProjectValue, setEditProjectValue] = useState('');
+  const editProjectRef = useRef(null);
+
+  const refresh = useCallback(async () => {
+    try { setTasks(await api('/api/tasks')); } catch { }
+    try { setProjects(await api('/api/projects')); } catch { }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 3000);
+    return () => clearInterval(id);
+  }, [refresh, refreshKey]);
+
+  useEffect(() => { if (editingProject !== null && editProjectRef.current) editProjectRef.current.focus(); }, [editingProject]);
+
+  const renameProject = async (oldName) => {
+    const newName = editProjectValue.trim();
+    setEditingProject(null);
+    if (!newName || newName === oldName) return;
+    // Update all tasks in this project
+    const projectTasks = tasks.filter(t => (t.labels && t.labels.project) === oldName || (!t.labels?.project && oldName === ''));
+    for (const t of projectTasks) {
+      const newLabels = { ...t.labels, project: newName };
+      await api(`/api/tasks/${t.task_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ labels: newLabels }),
+      });
+    }
+    refresh();
+  };
+
+  // Group by project label, sort: pending first, then by created_at desc
+  const sorted = [...tasks].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
+    return b.created_at - a.created_at;
+  });
+  const groups = {};
+  // Include all known projects (even empty)
+  for (const p of projects) { if (!groups[p]) groups[p] = []; }
+  for (const t of sorted) {
+    const project = (t.labels && t.labels.project) || '';
+    if (!groups[project]) groups[project] = [];
+    groups[project].push(t);
+  }
+  const projectKeys = Object.keys(groups).sort((a, b) => {
+    if (a === '') return 1;
+    if (b === '') return -1;
+    return a.localeCompare(b);
+  });
+
+  return (
+    <div>
+      {projectKeys.map(project => (
+        <div key={project} className="mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            {project && editingProject !== project && (
+              <span className="text-gray-300 hover:text-gray-600 cursor-pointer" onClick={() => { setEditingProject(project); setEditProjectValue(project); }}>&#9998;</span>
+            )}
+            {editingProject === project ? (
+              <input ref={editProjectRef} value={editProjectValue} onChange={e => setEditProjectValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') renameProject(project); if (e.key === 'Escape') setEditingProject(null); }}
+                onBlur={() => renameProject(project)}
+                className="border border-gray-300 rounded px-2 py-0.5 text-xs font-medium w-40 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+            ) : (
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">{project || 'No project'}</span>
+            )}
+            <span className="text-[10px] text-gray-400">{groups[project].filter(t => t.status === 'finished').length}/{groups[project].length}</span>
+            <button className="text-gray-400 hover:text-gray-600 text-xs px-2 py-0.5 rounded-md border border-gray-200 hover:bg-white transition" onClick={() => setModalProject(project || '')}>+ Add task</button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {groups[project].map(t => (
+              <Link key={t.task_id} to={`/tasks/${t.task_id}`} className="no-underline">
+                <TaskCard task={t} />
+              </Link>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TaskDetailView() {
+  const { taskId } = useParams();
+  const navigate = useNavigate();
+  const [task, setTask] = useState(null);
   const [executions, setExecutions] = useState([]);
-  const [currentId, setCurrentId] = useState(null);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descValue, setDescValue] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [startTarget, setStartTarget] = useState('');
+  const textareaRef = useRef(null);
+  const nameRef = useRef(null);
+
+  const refresh = useCallback(() => {
+    api(`/api/tasks/${taskId}`).then(t => {
+      setTask(t);
+      if (!editingDesc) setDescValue(t.description || '');
+    }).catch(() => {});
+    api(`/api/tasks/${taskId}/executions`).then(setExecutions).catch(() => {});
+  }, [taskId, editingDesc]);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 2000);
+    return () => clearInterval(id);
+  }, [refresh]);
+  useEffect(() => { if (editingDesc && textareaRef.current) textareaRef.current.focus(); }, [editingDesc]);
+  useEffect(() => { if (editingName && nameRef.current) nameRef.current.focus(); }, [editingName]);
+
+  const saveDesc = async () => {
+    setEditingDesc(false);
+    await api(`/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: descValue }),
+    });
+    refresh();
+  };
+
+  const startExecution = async () => {
+    if (!startTarget.trim()) return;
+    const result = await api(`/api/tasks/${taskId}/executions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: startTarget }),
+    });
+    setStartTarget('');
+    refresh();
+  };
+
+  const saveName = async () => {
+    setEditingName(false);
+    if (nameValue.trim() && nameValue !== task.name) {
+      await api(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameValue }),
+      });
+      refresh();
+    }
+  };
+
+  if (!task) return <div className="text-gray-400 py-8 text-center">Loading...</div>;
+
+  const hasLabels = Object.keys(task.labels).length > 0;
+
+  return (
+    <div>
+      {/* Breadcrumb */}
+      <div className="mb-3">
+        <Link to="/" className="text-xs text-gray-400 hover:text-gray-600 no-underline">Tasks</Link>
+        <span className="text-xs text-gray-300 mx-1">/</span>
+        <span className="text-xs text-gray-600">{task.name}</span>
+      </div>
+
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4">
+        {!editingName && (
+          <span className="text-gray-300 hover:text-gray-600 cursor-pointer" onClick={() => { setEditingName(true); setNameValue(task.name); }}>&#9998;</span>
+        )}
+        {editingName ? (
+          <input ref={nameRef} value={nameValue} onChange={e => setNameValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
+            onBlur={saveName}
+            className="text-lg font-semibold text-gray-800 flex-1 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+        ) : (
+          <h2 className="text-lg font-semibold text-gray-800 flex-1">{task.name}</h2>
+        )}
+        {task.needs_input && <span className="text-xs px-2 py-0.5 rounded bg-amber-50 text-amber-600 animate-pulse">input</span>}
+        <span className={`text-xs px-2 py-0.5 rounded ${task.status === 'pending' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+          {task.status}
+        </span>
+      </div>
+
+      <div className="flex gap-4">
+        {/* Main: description */}
+        <div className="flex-1 min-w-0">
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              {!editingDesc && (
+                <span className="text-gray-400 hover:text-gray-600 cursor-pointer" onClick={() => setEditingDesc(true)}>&#9998;</span>
+              )}
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Description</span>
+            </div>
+            {editingDesc ? (
+              <div>
+                <textarea ref={textareaRef} value={descValue} onChange={e => setDescValue(e.target.value)}
+                  rows={12}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 resize-y font-mono"
+                  placeholder="Write task description (markdown supported)..." />
+                <div className="flex gap-2 mt-2">
+                  <button onClick={saveDesc} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-medium transition">Save</button>
+                  <button onClick={() => { setEditingDesc(false); setDescValue(task.description || ''); }} className="text-gray-500 hover:text-gray-700 px-3 py-1 rounded text-xs">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              task.description
+                ? <div className="prose prose-sm max-w-none text-gray-700"><Markdown>{task.description}</Markdown></div>
+                : <div className="text-gray-300 text-sm italic cursor-pointer" onClick={() => setEditingDesc(true)}>Click to add description...</div>
+            )}
+          </div>
+          {/* Executions */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mt-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Executions</span>
+              <div className="flex gap-1">
+                <input value={startTarget} onChange={e => setStartTarget(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') startExecution(); }}
+                  className="border border-gray-300 rounded px-2 py-0.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 w-52"
+                  placeholder="file.py:workflow" />
+                <button onClick={startExecution}
+                  className="text-gray-400 hover:text-gray-600 text-xs px-2 py-0.5 rounded-md border border-gray-200 hover:bg-white transition">Start</button>
+              </div>
+            </div>
+            {executions.length === 0 && <div className="text-gray-300 text-xs text-center py-4">No executions yet</div>}
+            <div className="space-y-1">
+              {executions.map(e => {
+                const statusCls = e.finished ? 'bg-gray-100 text-gray-500' : e.has_pending_prompts ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-700';
+                const statusText = e.finished ? 'done' : e.has_pending_prompts ? 'input' : 'running';
+                return (
+                  <div key={e.execution_id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+                    onClick={() => navigate(`/tasks/${taskId}/executions/${e.execution_id}`)}>
+                    <span className="text-sm text-gray-700 flex-1">{e.description || e.workflow}</span>
+                    {e.total_cost > 0 && <span className="text-[10px] text-gray-400 font-mono">{formatCost(e.total_cost)}</span>}
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${statusCls}`}>{statusText}</span>
+                    <span className="text-[10px] text-gray-300 font-mono">{e.execution_id.substring(0, 8)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar: labels & meta */}
+        <div className="w-56 shrink-0">
+          {hasLabels && (
+            <div className="bg-white border border-gray-200 rounded-lg p-3 mb-3">
+              <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Labels</div>
+              <div className="space-y-1">
+                {Object.entries(task.labels).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between text-xs">
+                    <span className="text-gray-400">{k}</span>
+                    <span className="text-gray-700 font-medium">{v || '-'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="bg-white border border-gray-200 rounded-lg p-3">
+            <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Details</div>
+            <div className="space-y-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">ID</span>
+                <span className="text-gray-600 font-mono">{task.task_id.substring(0, 12)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">Created</span>
+                <span className="text-gray-600">{task.created_at ? new Date(task.created_at * 1000).toLocaleString() : '-'}</span>
+              </div>
+              {task.color && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Color</span>
+                  <span className="flex items-center gap-1 text-gray-600"><span className="inline-block w-3 h-3 rounded" style={{ background: task.color }} /> {task.color}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExecutionsView() {
+  const { taskId, executionId: currentId, workflowId: selectedWfId } = useParams();
+  const navigate = useNavigate();
+  const apiBase = `/api/tasks/${taskId}`;
+  const [executions, setExecutions] = useState([]);
   const [exec, setExec] = useState(null);
-  const [selectedWfId, setSelectedWfId] = useState(null);
   const [tab, setTab] = useState('chat');
   const [showAll, setShowAll] = useState(false);
   const [target, setTarget] = useState('');
-  const [args, setArgs] = useState('');
 
   const refresh = useCallback(async () => {
+    if (!taskId) return;
     try {
-      const execs = await api('/api/executions');
+      const execs = await api(`${apiBase}/executions`);
       execs.sort((a, b) => b.execution_id.localeCompare(a.execution_id));
       setExecutions(execs);
     } catch { }
-  }, []);
+  }, [taskId, apiBase]);
 
   const refreshExec = useCallback(async () => {
     if (!currentId) { setExec(null); return; }
     try {
-      const ex = await api(`/api/executions/${currentId}`);
+      const ex = await api(`${apiBase}/executions/${currentId}`);
       setExec(ex);
     } catch { }
-  }, [currentId]);
+  }, [currentId, apiBase]);
 
-  // Poll executions list
   useEffect(() => {
     refresh();
     const id = setInterval(refresh, 2000);
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Poll current execution
   useEffect(() => {
     refreshExec();
     const id = setInterval(refreshExec, 1000);
@@ -574,82 +960,130 @@ export default function App() {
   }, [refreshExec]);
 
   const selectExec = useCallback((id) => {
-    setCurrentId(id);
-    setSelectedWfId(null);
-  }, []);
+    navigate(`/tasks/${taskId}/executions/${id}`);
+  }, [navigate, taskId]);
+
+  const selectWf = useCallback((wfId) => {
+    navigate(`/tasks/${taskId}/executions/${currentId}/workflows/${wfId}`);
+  }, [navigate, taskId, currentId]);
 
   const startExec = async () => {
     if (!target) return;
-    const argsList = args ? JSON.parse(`[${args}]`) : [];
-    const result = await api('/api/executions', {
+    const result = await api(`${apiBase}/executions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target, args: argsList }),
+      body: JSON.stringify({ target }),
     });
-    setCurrentId(result.execution_id);
     refresh();
+    navigate(`/tasks/${taskId}/executions/${result.execution_id}`);
   };
 
   const tabCls = (t) => `px-4 py-1.5 text-sm font-medium ${t === tab ? 'bg-white text-gray-700' : 'bg-gray-50 text-gray-500'}`;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-4 bg-gray-50 text-gray-900 font-sans text-sm min-h-screen">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-lg font-semibold text-gray-800 tracking-tight">turbo-agent</h1>
-        <div className="flex gap-2">
+    <div className="flex gap-4" style={{ minHeight: 'calc(100vh - 100px)' }}>
+      <div className="w-64 shrink-0">
+        <div className="flex gap-2 mb-3">
           <input value={target} onChange={e => setTarget(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-72"
-            placeholder="examples/agent_demo.py:chat" />
-          <input value={args} onChange={e => setArgs(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-28"
-            placeholder="args" />
+            className="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0"
+            placeholder="file.py:workflow" />
           <button onClick={startExec}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-md text-sm font-medium transition">Start</button>
+            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded-md text-xs font-medium transition shrink-0">Start</button>
         </div>
+        <ExecList executions={executions} currentId={currentId} onSelect={selectExec}
+          onUpdateDescription={async (eid, desc) => {
+            await api(`${apiBase}/executions/${eid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: desc }) });
+            refresh(); refreshExec();
+          }} />
+        {exec && currentId && (
+          <WorkflowTree exec={exec} selectedWfId={selectedWfId || exec.root_workflow_id} onSelectWf={selectWf} />
+        )}
       </div>
 
-      <div className="flex gap-4" style={{ minHeight: 'calc(100vh - 100px)' }}>
-        {/* Sidebar */}
-        <div className="w-64 shrink-0">
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Executions</div>
-          <ExecList executions={executions} currentId={currentId} onSelect={selectExec}
-            onUpdateDescription={async (eid, desc) => {
-              await api(`/api/executions/${eid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: desc }) });
-              refresh(); refreshExec();
-            }} />
-          {exec && currentId && (
-            <WorkflowTree exec={exec} selectedWfId={selectedWfId || exec.root_workflow_id} onSelectWf={setSelectedWfId} />
-          )}
-        </div>
-
-        {/* Main */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-3">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
             <div className="flex gap-0 border border-gray-200 rounded-md overflow-hidden">
               <button className={`${tabCls('chat')} border-r border-gray-200`} onClick={() => setTab('chat')}>Chat</button>
               <button className={`${tabCls('events')} border-r border-gray-200`} onClick={() => setTab('events')}>Events</button>
               <button className={tabCls('status')} onClick={() => setTab('status')}>Status</button>
             </div>
-            <div className="flex items-center gap-3">
-              {tab === 'chat' && <Toggle checked={showAll} onChange={setShowAll} label="Details" />}
-              {exec && exec.total_cost > 0 && (
-                <span className="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-mono">{formatCost(exec.total_cost)}</span>
-              )}
-              <StatusBadge exec={exec} />
-            </div>
+            {tab === 'chat' && <Toggle checked={showAll} onChange={setShowAll} label="Details" />}
           </div>
-
-          {tab === 'chat' && (
-            <div>
-              <ChatView execId={currentId} exec={exec} showAll={showAll} selectedWfId={selectedWfId} />
-              <PromptInput execId={currentId} exec={exec} onSent={() => { refresh(); refreshExec(); }} />
-            </div>
-          )}
-          {tab === 'events' && <EventsView execId={currentId} exec={exec} />}
-          {tab === 'status' && <StatusView exec={exec} />}
+          <div className="flex items-center gap-3">
+            {exec && exec.total_cost > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-mono">{formatCost(exec.total_cost)}</span>
+            )}
+            <StatusBadge exec={exec} />
+          </div>
         </div>
+
+        {tab === 'chat' && (
+          <div>
+            <ChatView execId={currentId} exec={exec} showAll={showAll} selectedWfId={selectedWfId} apiBase={apiBase} />
+            <PromptInput execId={currentId} exec={exec} onSent={() => { refresh(); refreshExec(); }} apiBase={apiBase} />
+          </div>
+        )}
+        {tab === 'events' && <EventsView execId={currentId} exec={exec} apiBase={apiBase} />}
+        {tab === 'status' && <StatusView exec={exec} />}
       </div>
     </div>
+  );
+}
+
+function Layout({ children, toolbar }) {
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-4 bg-gray-50 text-gray-900 font-sans text-sm min-h-screen">
+      <div className="flex items-center gap-4 mb-4">
+        <Link to="/" className="text-lg font-semibold text-gray-800 tracking-tight no-underline">turbo-agent</Link>
+        <Link to="/" className="px-3 py-1 text-xs font-medium bg-gray-50 text-gray-400 no-underline hover:bg-white hover:text-gray-700 rounded-md border border-gray-200">Tasks</Link>
+        {toolbar}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function TasksPage() {
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [modalProject, setModalProject] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const navigate = useNavigate();
+
+  const toolbar = (
+    <button onClick={() => setShowProjectModal(true)}
+      className="text-gray-400 hover:text-gray-600 text-xs px-2 py-1 rounded-md border border-gray-200 hover:bg-white transition">+ Add project</button>
+  );
+
+  return (
+    <Layout toolbar={toolbar}>
+      {showProjectModal && (
+        <CreateProjectModal
+          onClose={() => setShowProjectModal(false)}
+          onCreated={() => { setShowProjectModal(false); setRefreshKey(k => k + 1); }}
+        />
+      )}
+      {modalProject !== null && (
+        <CreateTaskModal
+          project={modalProject || null}
+          onClose={() => setModalProject(null)}
+          onCreated={(task) => { setModalProject(null); setRefreshKey(k => k + 1); navigate(`/tasks/${task.task_id}`); }}
+        />
+      )}
+      <TasksView setModalProject={setModalProject} refreshKey={refreshKey} />
+    </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<TasksPage />} />
+        <Route path="/tasks/:taskId" element={<Layout><TaskDetailView /></Layout>} />
+        <Route path="/tasks/:taskId/executions/:executionId" element={<Layout><ExecutionsView /></Layout>} />
+        <Route path="/tasks/:taskId/executions/:executionId/workflows/:workflowId" element={<Layout><ExecutionsView /></Layout>} />
+      </Routes>
+    </BrowserRouter>
   );
 }

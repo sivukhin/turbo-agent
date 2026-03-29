@@ -45,7 +45,7 @@ class Engine:
         self.config = config
 
     def start(self, store, workflow_name, args, now=None, source_file=None,
-              workdir=None) -> str:
+              workdir=None, parent_conversation_id=None) -> str:
         now = now if now is not None else time.time()
         execution_id = _uuid()
         root_workflow_id = _uuid()
@@ -59,7 +59,16 @@ class Engine:
 
         conv_id = _uuid()
         wf_state.conversation_id = conv_id
-        store.create_conversation(conv_id)
+        if parent_conversation_id:
+            parent_ref = store.conv_resolve_ref(parent_conversation_id)
+            store.create_conversation(
+                conv_id,
+                parent_conversation_id=parent_ref.conversation_id,
+                parent_message_id=parent_ref.message_id,
+                parent_layer=parent_ref.layer,
+            )
+        else:
+            store.create_conversation(conv_id)
 
         state = ExecutionState(
             workflows={root_workflow_id: wf_state},

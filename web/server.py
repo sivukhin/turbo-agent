@@ -5,19 +5,20 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from workflows import Engine, EngineConfig, Store
 from workflows.loader import load_workflows_from_file
+from workflows.tasks import TaskStore
 from workflows.events import (
     UserPromptRequest, UserPromptResult, LlmRequest, LlmResponse,
     serialize_payload,
 )
 
-DB_PATH = os.environ.get('TURBO_DB', os.path.join(os.path.dirname(__file__), '..', 'executions.db'))
+TASKS_DB_PATH = os.environ.get('TURBO_TASKS_DB', os.path.join(os.path.dirname(__file__), '..', 'tasks.db'))
 
 # Pricing per 1M tokens (USD). Keys are prefixes matched against model IDs.
 MODEL_PRICING = {
@@ -76,10 +77,6 @@ _workers: dict[str, threading.Event] = {}
 _workers_lock = threading.Lock()
 
 
-def _store():
-    return Store(DB_PATH)
-
-
 def _engine_for_execution(store, execution_id):
     state, _ = store.load_state(execution_id)
     if state.source_file:
@@ -104,32 +101,30 @@ def _pending_prompt_workflow_ids(store, execution_id):
     return wf_ids
 
 
-def _worker_loop(execution_id: str, trigger: threading.Event):
+def _worker_loop(execution_id: str, trigger: threading.Event, store_factory=None):
     """Background worker: step until blocked, then sleep until triggered."""
+    make_store = store_factory
     while True:
-        # Step as much as possible
         made_progress = True
         while made_progress:
             made_progress = False
-            store = _store()
+            store = make_store()
             try:
                 state, _ = store.load_state(execution_id)
                 if state.finished:
-                    return  # done, exit thread
+                    return
                 if _has_pending_prompts(store, execution_id):
-                    break  # blocked on user, go to sleep
+                    break
                 engine, _ = _engine_for_execution(store, execution_id)
                 engine.step(store, execution_id)
                 made_progress = True
             finally:
                 store.close()
 
-        # Sleep until triggered (prompt answered, etc.)
         trigger.clear()
-        trigger.wait(timeout=30)  # wake periodically to check
+        trigger.wait(timeout=30)
 
-        # Check if execution is finished
-        store = _store()
+        store = make_store()
         try:
             state, _ = store.load_state(execution_id)
             if state.finished:
@@ -138,18 +133,18 @@ def _worker_loop(execution_id: str, trigger: threading.Event):
             store.close()
 
 
-def _ensure_worker(execution_id: str):
+def _ensure_worker(execution_id: str, store_factory=None):
     """Ensure a background worker exists for this execution. Wake it if sleeping."""
     with _workers_lock:
         if execution_id not in _workers:
             trigger = threading.Event()
             _workers[execution_id] = trigger
             threading.Thread(
-                target=_worker_loop, args=(execution_id, trigger),
+                target=_worker_loop, args=(execution_id, trigger, store_factory),
                 daemon=True, name=f'worker-{execution_id[:8]}',
             ).start()
         else:
-            _workers[execution_id].set()  # wake up
+            _workers[execution_id].set()
 
 
 def _wake_worker(execution_id: str):
@@ -171,32 +166,9 @@ def _execution_total_cost(store, execution_id):
     return round(cost, 6)
 
 
-@app.get('/api/executions')
-def list_executions():
-    store = _store()
-    execs = store.list_executions()
-    result = []
-    for eid, state, created_at in execs:
-        cost = _execution_total_cost(store, eid)
-        has_prompts = _has_pending_prompts(store, eid)
-        result.append({
-            'execution_id': eid,
-            'workflow': state.workflows[state.root_workflow_id].name,
-            'workflows_count': len(state.workflows),
-            'finished': state.finished,
-            'running_bg': eid in _workers,
-            'created_at': created_at,
-            'total_cost': cost,
-            'description': getattr(state, 'description', ''),
-            'has_pending_prompts': has_prompts,
-        })
-    store.close()
-    return result
-
-
-@app.get('/api/executions/{execution_id}')
-def get_execution(execution_id: str):
-    store = _store()
+@app.get('/api/tasks/{task_id}/executions/{execution_id}')
+def get_execution(task_id: str, execution_id: str):
+    store = _task_exec_store(task_id)
     try:
         state, last_event = store.load_state(execution_id)
     except KeyError:
@@ -245,9 +217,9 @@ def get_execution(execution_id: str):
     }
 
 
-@app.get('/api/executions/{execution_id}/events')
-def get_events(execution_id: str, after: int = 0):
-    store = _store()
+@app.get('/api/tasks/{task_id}/executions/{execution_id}/events')
+def get_events(task_id: str, execution_id: str, after: int = 0):
+    store = _task_exec_store(task_id)
     events = store.read_all_events(execution_id, after_event_id=after)
     store.close()
     return [{
@@ -355,9 +327,9 @@ def _compute_usage_stats(store, execution_id, messages):
     return stats
 
 
-@app.get('/api/executions/{execution_id}/conversation/{conversation_id}')
-def get_conversation(execution_id: str, conversation_id: str):
-    store = _store()
+@app.get('/api/tasks/{task_id}/executions/{execution_id}/conversation/{conversation_id}')
+def get_conversation(task_id: str, execution_id: str, conversation_id: str):
+    store = _task_exec_store(task_id)
     refs = store.conv_list_messages(conversation_id)
     messages = store.conv_read_messages(refs)
     usage_stats = _compute_usage_stats(store, execution_id, messages)
@@ -385,9 +357,9 @@ class PromptAnswer(BaseModel):
     response: str
 
 
-@app.post('/api/executions/{execution_id}/answer')
-def answer_prompt(execution_id: str, answer: PromptAnswer):
-    store = _store()
+@app.post('/api/tasks/{task_id}/executions/{execution_id}/answer')
+def answer_prompt(task_id: str, execution_id: str, answer: PromptAnswer):
+    store = _task_exec_store(task_id)
     try:
         state, _ = store.load_state(execution_id)
     except KeyError:
@@ -411,7 +383,7 @@ def answer_prompt(execution_id: str, answer: PromptAnswer):
     store.close()
 
     # Resume background execution
-    _ensure_worker(execution_id)
+    _ensure_worker(execution_id, store_factory=lambda: _task_exec_store(task_id))
     return {'ok': True}
 
 
@@ -419,9 +391,9 @@ class UpdateDescription(BaseModel):
     description: str
 
 
-@app.patch('/api/executions/{execution_id}')
-def update_execution(execution_id: str, body: UpdateDescription):
-    store = _store()
+@app.patch('/api/tasks/{task_id}/executions/{execution_id}')
+def update_execution(task_id: str, execution_id: str, body: UpdateDescription):
+    store = _task_exec_store(task_id)
     try:
         state, _ = store.load_state(execution_id)
     except KeyError:
@@ -433,9 +405,9 @@ def update_execution(execution_id: str, body: UpdateDescription):
     return {'ok': True}
 
 
-@app.get('/api/executions/{execution_id}/prompts')
-def get_pending_prompts(execution_id: str):
-    store = _store()
+@app.get('/api/tasks/{task_id}/executions/{execution_id}/prompts')
+def get_pending_prompts(task_id: str, execution_id: str):
+    store = _task_exec_store(task_id)
     outbox = store.read_outbox(execution_id)
     inbox = store.read_inbox(execution_id)
     store.close()
@@ -452,14 +424,143 @@ def get_pending_prompts(execution_id: str):
     return pending
 
 
-class StartRequest(BaseModel):
+
+# ---- Tasks API ----
+
+TASKS_DIR = os.environ.get('TURBO_TASKS_DIR', os.path.join(os.path.dirname(__file__), '..', '.tasks'))
+
+
+def _task_store():
+    return TaskStore(TASKS_DB_PATH, tasks_dir=TASKS_DIR)
+
+
+def _task_exec_store(task_id: str):
+    from workflows.tasks import task_db_path
+    db = task_db_path(TASKS_DIR, task_id)
+    os.makedirs(os.path.dirname(db), exist_ok=True)
+    return Store(db)
+
+
+@app.get('/api/projects')
+def list_projects():
+    ts = _task_store()
+    projects = ts.list_projects()
+    ts.close()
+    return projects
+
+
+@app.post('/api/projects')
+def create_project(body: dict):
+    ts = _task_store()
+    result = ts.create_project(body.get('name', ''))
+    ts.close()
+    return result
+
+
+@app.get('/api/tasks')
+def list_tasks():
+    ts = _task_store()
+    tasks = ts.list()
+    ts.close()
+    return tasks
+
+
+@app.post('/api/tasks')
+def create_task(body: dict):
+    ts = _task_store()
+    task = ts.create(
+        name=body.get('name', 'Untitled'),
+        description=body.get('description', ''),
+        labels=body.get('labels'),
+        color=body.get('color', ''),
+    )
+    ts.close()
+    return task
+
+
+@app.get('/api/tasks/{task_id}')
+def get_task(task_id: str):
+    ts = _task_store()
+    try:
+        task = ts.get(task_id)
+    except KeyError:
+        ts.close()
+        raise HTTPException(404, 'Task not found')
+    ts.close()
+    return task
+
+
+@app.patch('/api/tasks/{task_id}')
+def update_task(task_id: str, body: dict):
+    ts = _task_store()
+    try:
+        task = ts.update(task_id, **body)
+    except KeyError:
+        ts.close()
+        raise HTTPException(404, 'Task not found')
+    ts.close()
+    return task
+
+
+@app.delete('/api/tasks/{task_id}')
+def delete_task(task_id: str):
+    ts = _task_store()
+    try:
+        ts.delete(task_id)
+    except KeyError:
+        ts.close()
+        raise HTTPException(404, 'Task not found')
+    ts.close()
+    return {'ok': True}
+
+
+# ---- Task-scoped executions ----
+
+@app.get('/api/tasks/{task_id}/executions')
+def list_task_executions(task_id: str):
+    ts = _task_store()
+    try:
+        task = ts.get(task_id)
+    except KeyError:
+        ts.close()
+        raise HTTPException(404, 'Task not found')
+    ts.close()
+
+    store = _task_exec_store(task_id)
+    execs = store.list_executions()
+    result = []
+    for eid, state, created_at in execs:
+        cost = _execution_total_cost(store, eid)
+        has_prompts = _has_pending_prompts(store, eid)
+        result.append({
+            'execution_id': eid,
+            'workflow': state.workflows[state.root_workflow_id].name,
+            'workflows_count': len(state.workflows),
+            'finished': state.finished,
+            'created_at': created_at,
+            'total_cost': cost,
+            'has_pending_prompts': has_prompts,
+            'description': getattr(state, 'description', ''),
+        })
+    store.close()
+    return result
+
+
+class TaskStartRequest(BaseModel):
     target: str
     args: list = []
-    workdir: str = '.workspace'
 
 
-@app.post('/api/executions')
-def start_execution(req: StartRequest):
+@app.post('/api/tasks/{task_id}/executions')
+def start_task_execution(task_id: str, req: TaskStartRequest):
+    ts = _task_store()
+    try:
+        task = ts.get(task_id)
+    except KeyError:
+        ts.close()
+        raise HTTPException(404, 'Task not found')
+    ts.close()
+
     if ':' not in req.target:
         raise HTTPException(400, 'target must be file.py:workflow_name')
     file_path, wf_name = req.target.rsplit(':', 1)
@@ -467,16 +568,21 @@ def start_execution(req: StartRequest):
     if wf_name not in registry:
         raise HTTPException(400, f'Unknown workflow: {wf_name}')
 
-    store = _store()
+    from workflows.tasks import task_workdir as _task_workdir
+    store = _task_exec_store(task_id)
     engine = Engine(EngineConfig(workflows_registry=registry))
-    workdir = os.path.abspath(req.workdir)
+    workdir = _task_workdir(TASKS_DIR, task_id)
     os.makedirs(workdir, exist_ok=True)
-    execution_id = engine.start(store, wf_name, req.args, source_file=file_path, workdir=workdir)
+    execution_id = engine.start(
+        store, wf_name, req.args,
+        source_file=file_path,
+        workdir=workdir,
+        parent_conversation_id=task.get('context_conversation_id'),
+    )
     store.close()
 
-    # Run in background
-    _ensure_worker(execution_id)
-    return {'execution_id': execution_id}
+    _ensure_worker(execution_id, store_factory=lambda: _task_exec_store(task_id))
+    return {'execution_id': execution_id, 'task_id': task_id}
 
 
 # ---- Static files ----

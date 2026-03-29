@@ -370,6 +370,17 @@ class Store:
         self.conn.commit()
         return new_refs
 
+    def conv_update_message(self, ref: MessageRef, content) -> None:
+        """Update message content in place. Only for special cases like task context."""
+        if not isinstance(content, str):
+            content = json.dumps(content)
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE conversations SET content = ? WHERE conversation_id = ? AND message_id = ? AND layer = ?",
+            (content, ref.conversation_id, ref.message_id, ref.layer),
+        )
+        self.conn.commit()
+
     def conv_resolve_ref(self, conversation_id: str) -> ConversationRef:
         """Resolve to a concrete ConversationRef."""
         cur = self.conn.cursor()

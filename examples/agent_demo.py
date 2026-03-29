@@ -3,7 +3,7 @@
 Run with: uv run main.py run examples/agent_demo.py:chat
 """
 
-from workflows import workflow, conv_append, Latest, shell
+from workflows import workflow, conv_append, Latest, shell, conv_list
 from workflows.ops import ai, user_prompt, ai_response
 from workflows.isolation import DockerIsolation
 
@@ -28,10 +28,19 @@ def chat():
         },
     }]
 
+    skip_first_prompt = False
+    initial = yield conv_list()
+    if len(initial) > 0 and initial[-1].role == 'user':
+        skip_first_prompt = True
+
+    
     while True:
-        question = yield user_prompt()
-        if question.strip().lower() in ('quit', 'exit', 'bye'): break
-        yield conv_append(role='user', content=question)
+        if not skip_first_prompt:
+            question = yield user_prompt()
+            if question.strip().lower() in ('quit', 'exit', 'bye'): break
+            yield conv_append(role='user', content=question)
+        
+        skip_first_prompt = False
 
         while True:
             response = yield ai(conversation=Latest, system=SYSTEM_PROMPT, tools=TOOLS)

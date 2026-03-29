@@ -4,6 +4,13 @@ from workflows.handlers import WaitHandler, WaitAllHandler, WaitAnyHandler, Slee
 from workflows.events import WorkflowFinished
 
 
+class MockWf:
+    """Mock workflow state for resolve() tests."""
+    def __init__(self):
+        self.status = 'waiting'
+        self.send_val = None
+
+
 class TestWaitHandler:
     def test_initial_state(self):
         state = WaitHandler.initial_state(['dep-1'])
@@ -18,9 +25,10 @@ class TestWaitHandler:
         state = WaitHandler.initial_state(['dep-1'])
         state = WaitHandler.on_event('workflow_finished', 'dep-1', WorkflowFinished(result=42), state)
         assert state['resolved']
-        resolved, result = WaitHandler.try_resolve(state, 0)
-        assert resolved
-        assert result == 42
+        wf = MockWf()
+        assert WaitHandler.resolve(state, wf, 0)
+        assert wf.status == 'running'
+        assert wf.send_val == 42
 
     def test_ignores_tick_messages(self):
         state = WaitHandler.initial_state(['dep-1'])
@@ -29,8 +37,9 @@ class TestWaitHandler:
 
     def test_not_resolved_initially(self):
         state = WaitHandler.initial_state(['dep-1'])
-        resolved, _ = WaitHandler.try_resolve(state, 0)
-        assert not resolved
+        wf = MockWf()
+        assert not WaitHandler.resolve(state, wf, 0)
+        assert wf.status == 'waiting'
 
 
 class TestWaitAllHandler:
@@ -42,41 +51,40 @@ class TestWaitAllHandler:
     def test_collects_results(self):
         state = WaitAllHandler.initial_state(['a', 'b'])
         state = WaitAllHandler.on_event('workflow_finished', 'a', WorkflowFinished(result=10), state)
-        resolved, _ = WaitAllHandler.try_resolve(state, 0)
-        assert not resolved  # still waiting for b
+        wf = MockWf()
+        assert not WaitAllHandler.resolve(state, wf, 0)
 
         state = WaitAllHandler.on_event('workflow_finished', 'b', WorkflowFinished(result=20), state)
-        resolved, result = WaitAllHandler.try_resolve(state, 0)
-        assert resolved
-        assert result == [10, 20]
+        assert WaitAllHandler.resolve(state, wf, 0)
+        assert wf.send_val == [10, 20]
 
     def test_preserves_order(self):
         state = WaitAllHandler.initial_state(['x', 'y', 'z'])
         state = WaitAllHandler.on_event('workflow_finished', 'z', WorkflowFinished(result=3), state)
         state = WaitAllHandler.on_event('workflow_finished', 'x', WorkflowFinished(result=1), state)
         state = WaitAllHandler.on_event('workflow_finished', 'y', WorkflowFinished(result=2), state)
-        resolved, result = WaitAllHandler.try_resolve(state, 0)
-        assert resolved
-        assert result == [1, 2, 3]  # order matches deps, not arrival
+        wf = MockWf()
+        WaitAllHandler.resolve(state, wf, 0)
+        assert wf.send_val == [1, 2, 3]
 
     def test_single_dep_returns_list(self):
         state = WaitAllHandler.initial_state(['only'])
         state = WaitAllHandler.on_event('workflow_finished', 'only', WorkflowFinished(result=99), state)
-        resolved, result = WaitAllHandler.try_resolve(state, 0)
-        assert resolved
-        assert result == [99]  # always a list, use wait() for unwrapped
+        wf = MockWf()
+        WaitAllHandler.resolve(state, wf, 0)
+        assert wf.send_val == [99]
 
     def test_ignores_unrelated(self):
         state = WaitAllHandler.initial_state(['a', 'b'])
         state = WaitAllHandler.on_event('workflow_finished', 'c', WorkflowFinished(result=0), state)
-        resolved, _ = WaitAllHandler.try_resolve(state, 0)
-        assert not resolved
+        wf = MockWf()
+        assert not WaitAllHandler.resolve(state, wf, 0)
 
     def test_empty_deps_resolves_immediately(self):
         state = WaitAllHandler.initial_state([])
-        resolved, result = WaitAllHandler.try_resolve(state, 0)
-        assert resolved
-        assert result == []
+        wf = MockWf()
+        assert WaitAllHandler.resolve(state, wf, 0)
+        assert wf.send_val == []
 
 
 class TestWaitAnyHandler:
@@ -88,29 +96,28 @@ class TestWaitAnyHandler:
     def test_resolves_on_first_finish(self):
         state = WaitAnyHandler.initial_state(['a', 'b', 'c'])
         state = WaitAnyHandler.on_event('workflow_finished', 'b', WorkflowFinished(result=42), state)
-        resolved, result = WaitAnyHandler.try_resolve(state, 0)
-        assert resolved
-        # Returns list: [(False, None), (True, 42), (False, None)]
-        assert result == [(False, None), (True, 42), (False, None)]
+        wf = MockWf()
+        assert WaitAnyHandler.resolve(state, wf, 0)
+        assert wf.send_val == [(False, None), (True, 42), (False, None)]
 
     def test_multiple_finished(self):
         state = WaitAnyHandler.initial_state(['a', 'b', 'c'])
         state = WaitAnyHandler.on_event('workflow_finished', 'a', WorkflowFinished(result=1), state)
         state = WaitAnyHandler.on_event('workflow_finished', 'c', WorkflowFinished(result=3), state)
-        resolved, result = WaitAnyHandler.try_resolve(state, 0)
-        assert resolved
-        assert result == [(True, 1), (False, None), (True, 3)]
+        wf = MockWf()
+        WaitAnyHandler.resolve(state, wf, 0)
+        assert wf.send_val == [(True, 1), (False, None), (True, 3)]
 
     def test_not_resolved_initially(self):
         state = WaitAnyHandler.initial_state(['a', 'b'])
-        resolved, _ = WaitAnyHandler.try_resolve(state, 0)
-        assert not resolved
+        wf = MockWf()
+        assert not WaitAnyHandler.resolve(state, wf, 0)
 
     def test_ignores_unrelated(self):
         state = WaitAnyHandler.initial_state(['a', 'b'])
         state = WaitAnyHandler.on_event('workflow_finished', 'c', WorkflowFinished(result=0), state)
-        resolved, _ = WaitAnyHandler.try_resolve(state, 0)
-        assert not resolved
+        wf = MockWf()
+        assert not WaitAnyHandler.resolve(state, wf, 0)
 
 
 class TestSleepHandler:
@@ -120,20 +127,22 @@ class TestSleepHandler:
 
     def test_not_resolved_before_wake(self):
         state = SleepHandler.initial_state(1000.0)
-        resolved, _ = SleepHandler.try_resolve(state, 999.0)
-        assert not resolved
+        wf = MockWf()
+        assert not SleepHandler.resolve(state, wf, 999.0)
+        assert wf.status == 'waiting'
 
     def test_resolves_at_exact_wake_time(self):
         state = SleepHandler.initial_state(1000.0)
-        resolved, result = SleepHandler.try_resolve(state, 1000.0)
-        assert resolved
-        assert result is None
+        wf = MockWf()
+        assert SleepHandler.resolve(state, wf, 1000.0)
+        assert wf.status == 'running'
+        assert wf.send_val is None
 
     def test_resolves_after_wake_time(self):
         state = SleepHandler.initial_state(1000.0)
-        resolved, result = SleepHandler.try_resolve(state, 1500.0)
-        assert resolved
-        assert result is None
+        wf = MockWf()
+        assert SleepHandler.resolve(state, wf, 1500.0)
+        assert wf.status == 'running'
 
     def test_ignores_messages(self):
         state = SleepHandler.initial_state(1000.0)

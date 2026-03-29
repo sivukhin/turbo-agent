@@ -1,9 +1,10 @@
 from workflows.decorator import workflow, DurableGenerator
-from workflows.engine import (
-    Engine, ExecutionState, WorkflowState, WorkflowHandle,
-    HandlerState, Event, WaitOp, SleepOp, ShellOp, ReadFileOp, WriteFileOp, LlmOp,
+from workflows.ops import (
+    Event, WorkflowHandle, WorkflowState, HandlerState, ExecutionState,
+    WaitOp, SleepOp, ShellOp, ReadFileOp, WriteFileOp, LlmOp,
     wait, wait_all, wait_any, sleep, shell, read_file, write_file, llm,
 )
+from workflows.engine import Engine
 from workflows.conversation import (
     ConversationRef, ConversationMessage, MessageRef, Latest,
     conv_append, conv_read, conv_search, conv_get, conv_replace_with,

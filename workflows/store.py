@@ -1,7 +1,7 @@
 import pickle
 import uuid
 import turso
-from workflows.engine import ExecutionState, Event
+from workflows.ops import ExecutionState, Event
 from workflows.events import serialize_payload, deserialize_payload, payload_type_name
 from workflows.conversation import (
     MessageRef, ConversationRef, ConversationMessage, _sortable_uuid,
@@ -116,6 +116,27 @@ class Store:
                WHERE execution_id = ? AND category = ? AND event_id > ?
                ORDER BY event_id""",
             (execution_id, category, after_event_id),
+        )
+        return [
+            Event(
+                event_id=row[0],
+                execution_id=row[1],
+                workflow_id=row[2],
+                category=row[3],
+                payload=deserialize_payload(row[4]),
+            )
+            for row in cur.fetchall()
+        ]
+
+    def read_all_events(self, execution_id: str, after_event_id: int = 0) -> list[Event]:
+        """Read all events (inbox + outbox) after a given event_id."""
+        cur = self.conn.cursor()
+        cur.execute(
+            """SELECT event_id, execution_id, workflow_id, category, payload
+               FROM events
+               WHERE execution_id = ? AND event_id > ?
+               ORDER BY event_id""",
+            (execution_id, after_event_id),
         )
         return [
             Event(

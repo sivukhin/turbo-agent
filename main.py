@@ -57,7 +57,7 @@ def cmd_start(args):
 
     parsed_args = [json.loads(a) for a in args.args]
     store = Store(DB_PATH)
-    engine = Engine(registry)
+    engine = Engine.from_registry(registry)
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
     execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path,
@@ -85,7 +85,7 @@ def cmd_step(args):
     last_inbox = inbox_before[-1].event_id if inbox_before else 0
     last_outbox = outbox_before[-1].event_id if outbox_before else 0
 
-    engine = Engine(registry)
+    engine = Engine.from_registry(registry)
     try:
         engine.step(store, args.id)
     except Exception as e:

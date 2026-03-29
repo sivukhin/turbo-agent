@@ -1,19 +1,43 @@
-"""Handler registry for wait operations.
+"""Event handler system.
 
-Each handler has:
-  initial_state(args) -> state
-  on_event(event_type, event_workflow_id, payload, state) -> state
-  try_resolve(state, now) -> (resolved, result)
+Two types of handlers:
 
-payload is a typed dataclass from workflows.events.
+1. EventHandler — global, targets an event type, can read/write DB and emit events.
+2. WorkflowEventHandler — attached to a waiting workflow, accumulates state from
+   events, has resolve() which can switch the workflow back to running.
 """
 
+from dataclasses import dataclass
+from typing import Protocol
 from workflows.events import WorkflowFinished
 
 
-class WaitHandler:
-    """Wait for a single workflow to finish."""
+# ---- Base protocols ----
 
+class EventHandler(Protocol):
+    """Global event handler. Targets a specific event type."""
+    @staticmethod
+    def event_type() -> str: ...
+    @staticmethod
+    def handle(event, store) -> list: ...  # returns new events to emit
+
+
+class WorkflowEventHandler(Protocol):
+    """Handler attached to a waiting workflow."""
+    @staticmethod
+    def initial_state(*args) -> dict: ...
+    @staticmethod
+    def on_event(event_type: str, event_workflow_id: str | None,
+                 payload, state: dict) -> dict: ...
+    @staticmethod
+    def resolve(state: dict, wf, now: float) -> bool:
+        """Try to resolve. If resolved, mutate wf (set status, send_val) and return True."""
+        ...
+
+
+# ---- WorkflowEventHandler implementations ----
+
+class WaitHandler:
     @staticmethod
     def initial_state(deps):
         return {'dep': deps[0], 'result': None, 'resolved': False}
@@ -26,15 +50,15 @@ class WaitHandler:
         return state
 
     @staticmethod
-    def try_resolve(state, now):
+    def resolve(state, wf, now):
         if state['resolved']:
-            return True, state['result']
-        return False, None
+            wf.status = 'running'
+            wf.send_val = state['result']
+            return True
+        return False
 
 
 class WaitAllHandler:
-    """Wait for all workflows in a list to finish."""
-
     @staticmethod
     def initial_state(deps):
         return {'deps': list(deps), 'results': {}}
@@ -48,16 +72,16 @@ class WaitAllHandler:
         return state
 
     @staticmethod
-    def try_resolve(state, now):
+    def resolve(state, wf, now):
         if all(d in state['results'] for d in state['deps']):
             ordered = [state['results'][d] for d in state['deps']]
-            return True, ordered
-        return False, None
+            wf.status = 'running'
+            wf.send_val = ordered
+            return True
+        return False
 
 
 class WaitAnyHandler:
-    """Wait for at least one workflow to finish. Returns list of (bool, result|None)."""
-
     @staticmethod
     def initial_state(deps):
         return {'deps': list(deps), 'results': {}}
@@ -71,19 +95,19 @@ class WaitAnyHandler:
         return state
 
     @staticmethod
-    def try_resolve(state, now):
+    def resolve(state, wf, now):
         if state['results']:
             result = [
                 (True, state['results'][d]) if d in state['results'] else (False, None)
                 for d in state['deps']
             ]
-            return True, result
-        return False, None
+            wf.status = 'running'
+            wf.send_val = result
+            return True
+        return False
 
 
 class SleepHandler:
-    """Sleep until a given timestamp. Resolves when now >= wake_at."""
-
     @staticmethod
     def initial_state(wake_at):
         return {'wake_at': wake_at}
@@ -93,11 +117,15 @@ class SleepHandler:
         return state
 
     @staticmethod
-    def try_resolve(state, now):
+    def resolve(state, wf, now):
         if now >= state['wake_at']:
-            return True, None
-        return False, None
+            wf.status = 'running'
+            wf.send_val = None
+            return True
+        return False
 
+
+# ---- Registry ----
 
 HANDLER_REGISTRY = {
     'wait': WaitHandler,

@@ -22,6 +22,8 @@ class WorkflowFinished:
 @dataclass
 class ShellRequest:
     command: str
+    isolation_type: str = 'host'  # 'host' | 'docker'
+    isolation_config: dict | None = None  # docker: {"image": ..., "network": ...}
 
 @dataclass
 class ShellResult:

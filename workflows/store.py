@@ -23,7 +23,8 @@ class Store:
                 execution_id TEXT PRIMARY KEY,
                 state BLOB NOT NULL,
                 last_processed_event_id INTEGER NOT NULL DEFAULT 0,
-                finished INTEGER NOT NULL DEFAULT 0
+                finished INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -32,7 +33,8 @@ class Store:
                 workflow_id TEXT,
                 category TEXT NOT NULL,
                 type TEXT NOT NULL,
-                payload TEXT NOT NULL
+                payload TEXT NOT NULL,
+                created_at REAL NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_inbox
@@ -51,6 +53,8 @@ class Store:
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 meta TEXT NOT NULL DEFAULT '{}',
+                event_time INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL DEFAULT 0,
                 PRIMARY KEY (conversation_id, message_id, layer)
             );
 
@@ -65,19 +69,21 @@ class Store:
 
     def save_state(self, execution_id: str, state: ExecutionState,
                    last_processed_event_id: int | None = None):
+        import time as _time
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT last_processed_event_id FROM executions WHERE execution_id = ?",
+            "SELECT last_processed_event_id, created_at FROM executions WHERE execution_id = ?",
             (execution_id,),
         )
         row = cur.fetchone()
         lp = last_processed_event_id if last_processed_event_id is not None else (row[0] if row else 0)
+        created_at = row[1] if row else _time.time()
 
         cur.execute(
             """INSERT OR REPLACE INTO executions
-               (execution_id, state, last_processed_event_id, finished)
-               VALUES (?, ?, ?, ?)""",
-            (execution_id, pickle.dumps(state), lp, int(state.finished)),
+               (execution_id, state, last_processed_event_id, finished, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (execution_id, pickle.dumps(state), lp, int(state.finished), created_at),
         )
         self.conn.commit()
 
@@ -92,6 +98,12 @@ class Store:
             raise KeyError(f"Execution {execution_id} not found")
         return pickle.loads(row[0]), row[1]
 
+    def get_created_at(self, execution_id: str) -> float:
+        cur = self.conn.cursor()
+        cur.execute("SELECT created_at FROM executions WHERE execution_id = ?", (execution_id,))
+        row = cur.fetchone()
+        return row[0] if row else 0.0
+
     def append_event(self, execution_id: str, workflow_id: str | None,
                      category: str, payload) -> None:
         """Append a single event with immediate commit."""
@@ -99,13 +111,15 @@ class Store:
 
     def append_events(self, events: list[tuple]) -> None:
         """Batch-append events. Each tuple: (execution_id, workflow_id, category, payload)."""
+        import time as _time
+        now = _time.time()
         cur = self.conn.cursor()
         for execution_id, workflow_id, category, payload in events:
             cur.execute(
-                """INSERT INTO events (execution_id, workflow_id, category, type, payload)
-                   VALUES (?, ?, ?, ?, ?)""",
+                """INSERT INTO events (execution_id, workflow_id, category, type, payload, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (execution_id, workflow_id, category,
-                 payload_type_name(payload), serialize_payload(payload)),
+                 payload_type_name(payload), serialize_payload(payload), now),
             )
         self.conn.commit()
 
@@ -113,7 +127,7 @@ class Store:
                      after_event_id: int = 0) -> list[Event]:
         cur = self.conn.cursor()
         cur.execute(
-            """SELECT event_id, execution_id, workflow_id, category, payload
+            """SELECT event_id, execution_id, workflow_id, category, payload, created_at
                FROM events
                WHERE execution_id = ? AND category = ? AND event_id > ?
                ORDER BY event_id""",
@@ -126,6 +140,7 @@ class Store:
                 workflow_id=row[2],
                 category=row[3],
                 payload=deserialize_payload(row[4]),
+                created_at=row[5] or 0.0,
             )
             for row in cur.fetchall()
         ]
@@ -134,7 +149,7 @@ class Store:
         """Read all events (inbox + outbox) after a given event_id."""
         cur = self.conn.cursor()
         cur.execute(
-            """SELECT event_id, execution_id, workflow_id, category, payload
+            """SELECT event_id, execution_id, workflow_id, category, payload, created_at
                FROM events
                WHERE execution_id = ? AND event_id > ?
                ORDER BY event_id""",
@@ -147,6 +162,7 @@ class Store:
                 workflow_id=row[2],
                 category=row[3],
                 payload=deserialize_payload(row[4]),
+                created_at=row[5] or 0.0,
             )
             for row in cur.fetchall()
         ]
@@ -157,10 +173,10 @@ class Store:
     def read_outbox(self, execution_id: str, after_event_id: int = 0) -> list[Event]:
         return self._read_events(execution_id, 'outbox', after_event_id)
 
-    def list_executions(self) -> list[tuple[str, ExecutionState]]:
+    def list_executions(self) -> list[tuple[str, ExecutionState, float]]:
         cur = self.conn.cursor()
-        cur.execute("SELECT execution_id, state FROM executions ORDER BY execution_id")
-        return [(row[0], pickle.loads(row[1])) for row in cur.fetchall()]
+        cur.execute("SELECT execution_id, state, created_at FROM executions ORDER BY execution_id")
+        return [(row[0], pickle.loads(row[1]), row[2] or 0.0) for row in cur.fetchall()]
 
     # ---- Conversation methods ----
 
@@ -178,7 +194,9 @@ class Store:
         self.conn.commit()
 
     def conv_append_message(self, conversation_id: str, role: str,
-                            content, meta: dict | None = None) -> MessageRef:
+                            content, meta: dict | None = None,
+                            event_time: int = 0) -> MessageRef:
+        import time as _time
         if not isinstance(content, str):
             content = json.dumps(content)
         message_id = _sortable_uuid()
@@ -186,13 +204,13 @@ class Store:
         cur = self.conn.cursor()
         cur.execute(
             """INSERT INTO conversations
-               (conversation_id, message_id, layer, tombstone, role, content, meta)
-               VALUES (?, ?, 0, 0, ?, ?, ?)""",
-            (conversation_id, message_id, role, content, json.dumps(meta)),
+               (conversation_id, message_id, layer, tombstone, role, content, meta, event_time, created_at)
+               VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)""",
+            (conversation_id, message_id, role, content, json.dumps(meta), event_time, _time.time()),
         )
         self.conn.commit()
         return MessageRef(conversation_id=conversation_id, message_id=message_id,
-                          layer=0, role=role, meta=meta)
+                          layer=0, role=role, meta=meta, event_time=event_time)
 
     def conv_list_messages(self, conversation_id: str,
                            end_message_id: str | None = None,
@@ -242,14 +260,14 @@ class Store:
 
         where = " AND ".join(conditions)
         cur.execute(
-            f"SELECT message_id, layer, tombstone, role, meta "
+            f"SELECT message_id, layer, tombstone, role, meta, event_time, created_at "
             f"FROM conversations WHERE {where} ORDER BY message_id, layer DESC",
             params,
         )
 
         refs = []
         seen = set()
-        for msg_id, layer, tombstone, role, meta_str in cur.fetchall():
+        for msg_id, layer, tombstone, role, meta_str, event_time, created_at in cur.fetchall():
             if msg_id in seen:
                 continue
             seen.add(msg_id)
@@ -269,7 +287,7 @@ class Store:
                 if row and pattern.replace('%', '') not in row[0]:
                     continue
             meta = json.loads(meta_str) if meta_str else {}
-            refs.append(MessageRef(conversation_id, msg_id, layer, role, meta))
+            refs.append(MessageRef(conversation_id, msg_id, layer, role, meta, event_time or 0))
 
         refs.sort(key=lambda r: r.message_id)
         return refs
@@ -280,7 +298,7 @@ class Store:
         cur = self.conn.cursor()
         for ref in refs:
             cur.execute(
-                "SELECT content, meta FROM conversations "
+                "SELECT content, meta, event_time, created_at FROM conversations "
                 "WHERE conversation_id = ? AND message_id = ? AND layer = ?",
                 (ref.conversation_id, ref.message_id, ref.layer),
             )
@@ -289,15 +307,18 @@ class Store:
                 meta = json.loads(row[1]) if row[1] else {}
                 enriched_ref = MessageRef(
                     ref.conversation_id, ref.message_id, ref.layer,
-                    ref.role, meta,
+                    ref.role, meta, row[2] or 0,
                 )
-                results.append(Message(ref=enriched_ref, content=row[0]))
+                msg = Message(ref=enriched_ref, content=row[0])
+                msg.created_at = row[3] or 0.0
+                results.append(msg)
         return results
 
     def conv_replace_with(self, conversation_id: str,
                           new_messages: list[dict],
                           start_message_id: str | None = None,
-                          end_message_id: str | None = None) -> list[MessageRef]:
+                          end_message_id: str | None = None,
+                          event_time: int = 0) -> list[MessageRef]:
         """Replace a range of messages with new ones via layer compaction."""
         cur = self.conn.cursor()
 
@@ -340,11 +361,11 @@ class Store:
             meta = msg.get('meta', {})
             cur.execute(
                 """INSERT INTO conversations
-                   (conversation_id, message_id, layer, tombstone, role, content, meta)
-                   VALUES (?, ?, ?, 0, ?, ?, ?)""",
-                (conversation_id, msg_id, new_layer, msg['role'], msg['content'], json.dumps(meta)),
+                   (conversation_id, message_id, layer, tombstone, role, content, meta, event_time)
+                   VALUES (?, ?, ?, 0, ?, ?, ?, ?)""",
+                (conversation_id, msg_id, new_layer, msg['role'], msg['content'], json.dumps(meta), event_time),
             )
-            new_refs.append(MessageRef(conversation_id, msg_id, new_layer, msg['role'], meta))
+            new_refs.append(MessageRef(conversation_id, msg_id, new_layer, msg['role'], meta, event_time))
 
         self.conn.commit()
         return new_refs

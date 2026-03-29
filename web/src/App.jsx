@@ -7,6 +7,12 @@ async function api(path, opts) {
   return r.json();
 }
 
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function ExecList({ executions, currentId, onSelect }) {
   return (
     <div className="space-y-1">
@@ -22,7 +28,7 @@ function ExecList({ executions, currentId, onSelect }) {
               <span className="font-medium text-gray-800 text-sm">{e.workflow}</span>
               <span className={`text-xs px-1.5 py-0.5 rounded ${statusCls}`}>{statusText}</span>
             </div>
-            <div className="text-xs text-gray-400 mt-0.5 font-mono">{e.execution_id.substring(0, 12)}</div>
+            <div className="text-xs text-gray-400 mt-0.5 font-mono">{e.execution_id.substring(0, 12)}{e.created_at ? <span className="ml-2">{formatTime(e.created_at)}</span> : null}</div>
           </div>
         );
       })}
@@ -97,6 +103,70 @@ function ToolResultMessage({ content }) {
   } catch { return <div className="whitespace-pre-wrap text-xs">{content}</div>; }
 }
 
+function formatCost(cost) {
+  if (cost >= 0.01) return '$' + cost.toFixed(2);
+  if (cost >= 0.001) return '$' + cost.toFixed(3);
+  return '$' + cost.toFixed(4);
+}
+
+function formatDuration(s) {
+  if (s < 1) return (s * 1000).toFixed(0) + 'ms';
+  if (s < 60) return s.toFixed(1) + 's';
+  return (s / 60).toFixed(1) + 'm';
+}
+
+function UsageBadge({ usage }) {
+  const [expanded, setExpanded] = useState(false);
+  const t = usage.total;
+  const hasCache = t.cache_creation_input_tokens > 0 || t.cache_read_input_tokens > 0;
+  return (
+    <div className="mt-1.5">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <span className="inline-flex items-center gap-1 bg-gray-100 rounded px-1.5 py-0.5">
+          <span className="text-gray-500">in</span> {t.input_tokens.toLocaleString()}
+        </span>
+        <span className="inline-flex items-center gap-1 bg-gray-100 rounded px-1.5 py-0.5">
+          <span className="text-gray-500">out</span> {t.output_tokens.toLocaleString()}
+        </span>
+        {hasCache && (
+          <span className="inline-flex items-center gap-1 bg-amber-50 rounded px-1.5 py-0.5 text-amber-600">
+            cache +{t.cache_creation_input_tokens.toLocaleString()} / hit {t.cache_read_input_tokens.toLocaleString()}
+          </span>
+        )}
+        {usage.cost > 0 && (
+          <span className="inline-flex items-center gap-1 bg-emerald-50 rounded px-1.5 py-0.5 text-emerald-600">
+            {formatCost(usage.cost)}
+          </span>
+        )}
+        {usage.turn_time > 0 && (
+          <span className="inline-flex items-center gap-1 bg-blue-50 rounded px-1.5 py-0.5 text-blue-500">
+            {formatDuration(usage.turn_time)}
+          </span>
+        )}
+        {usage.step_count > 1 && (
+          <span className="inline-flex items-center gap-1 bg-purple-50 rounded px-1.5 py-0.5 text-purple-500">
+            {usage.step_count} steps {usage.llm_time > 0 && `(${formatDuration(usage.llm_time)} llm)`}
+          </span>
+        )}
+        {usage.step_count > 1 && <span className="text-gray-300 select-none">{expanded ? '\u25BC' : '\u25B6'}</span>}
+      </div>
+      {expanded && usage.steps.length > 1 && (
+        <div className="mt-1 ml-2 space-y-0.5 text-xs text-gray-400 border-l-2 border-gray-100 pl-2">
+          {usage.steps.map((s, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-1.5">
+              <span className="text-gray-500 font-mono">{s.model}</span>
+              <span>in {s.input_tokens.toLocaleString()}</span>
+              <span>out {s.output_tokens.toLocaleString()}</span>
+              {s.cost > 0 && <span className="text-emerald-600">{formatCost(s.cost)}</span>}
+              {s.duration > 0 && <span className="text-blue-500">{formatDuration(s.duration)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatMessage({ m, showAll }) {
   const isMain = m.role === 'user' || m.role === 'assistant';
   const hidden = hasLabel(m, 'hidden');
@@ -123,8 +193,13 @@ function ChatMessage({ m, showAll }) {
         <div className="flex gap-3">
           <div className={`w-7 h-7 rounded-full ${c.bg} ${c.text} flex items-center justify-center text-xs font-bold shrink-0 mt-0.5`}>{c.letter}</div>
           <div className="flex-1 min-w-0">
-            <div className={`text-xs font-medium ${c.text} mb-0.5`}>{c.label}</div>
+            <div className={`text-xs font-medium ${c.text} mb-0.5`}>
+              {c.label}
+              {m.meta && m.meta.model && <span className="ml-2 text-gray-400 font-normal font-mono">{m.meta.model}</span>}
+              {m.created_at ? <span className="ml-2 text-gray-400 font-normal">{formatTime(m.created_at)}</span> : null}
+            </div>
             {renderBody()}
+            {m.usage && <UsageBadge usage={m.usage} />}
           </div>
         </div>
       </div>
@@ -136,7 +211,7 @@ function ChatMessage({ m, showAll }) {
       <div className="flex gap-3">
         <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">{m.role[0].toUpperCase()}</div>
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium text-gray-500 mb-0.5">{m.role}</div>
+          <div className="text-xs font-medium text-gray-500 mb-0.5">{m.role}{m.created_at ? <span className="ml-2 text-gray-400 font-normal">{formatTime(m.created_at)}</span> : null}</div>
           <div className="text-gray-600 text-xs">{renderContent(m.content)}</div>
         </div>
       </div>
@@ -248,6 +323,7 @@ function EventRow({ e }) {
       <div className="flex gap-2 px-3 py-1 items-baseline hover:bg-gray-50 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <span className="w-4 text-gray-400 select-none">{expanded ? '\u25BC' : '\u25B6'}</span>
         <span className="w-8 text-right text-gray-400">{e.event_id}</span>
+        <span className="w-16 text-gray-400 tabular-nums">{formatTime(e.created_at)}</span>
         <span className={`w-12 ${catCls} font-medium`}>{e.category}</span>
         <span className="w-16 text-gray-400 truncate">{(e.workflow_id || '-').substring(0, 8)}</span>
         <span className="w-44 text-gray-700 font-medium truncate">{e.type}</span>

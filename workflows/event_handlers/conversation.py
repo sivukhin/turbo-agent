@@ -7,7 +7,7 @@ import workflows.events as ev
 class ConvAppendRequestHandler:
     def handle(self, event, store, state):
         payload = event.payload
-        ref = store.conv_append_message(payload.conversation_id, payload.role, payload.content, meta=payload.meta)
+        ref = store.conv_append_message(payload.conversation_id, payload.role, payload.content, meta=payload.meta, event_time=event.event_id)
         resolve_wf(state, event.workflow_id, ref)
         return [make_inbox_event(event, ev.ConvAppendResult(
             conversation_id=ref.conversation_id,
@@ -54,6 +54,7 @@ class ConvReplaceWithRequestHandler:
         new_refs = store.conv_replace_with(
             payload.conversation_id, payload.new_messages,
             payload.start_message_id, payload.end_message_id,
+            event_time=event.event_id,
         )
         resolve_wf(state, event.workflow_id, new_refs)
         return [make_inbox_event(event, ev.ConvReplaceWithResult(

@@ -97,6 +97,7 @@ class Event:
     workflow_id: str | None
     category: str
     payload: object
+    created_at: float = 0.0
 
     @property
     def type(self) -> str:

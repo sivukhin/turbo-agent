@@ -39,6 +39,7 @@ class MessageRef:
     layer: int
     role: str
     meta: dict = field(default_factory=dict)  # arbitrary JSON metadata; well-known key: "labels" (comma-separated)
+    event_time: int = 0  # event_id at creation time — logical clock for correlating with events
 
 
 @dataclass

@@ -20,7 +20,7 @@ def chat():
     TOOLS = [{
         'name': 'run_shell',
         'description': 'Execute a shell command in a sandboxed Docker container (python:3.13-slim-bookworm). '
-                        'Use this to run Python scripts, install packages, inspect files, etc.',
+                        'Use this to run Python scripts, install packages, write and inspect files, etc.',
         'input_schema': {
             'type': 'object',
             'properties': {'command': {'type': 'string', 'description': 'The shell command to execute'}},
@@ -38,11 +38,17 @@ def chat():
             if response.tool_calls:
                 for block in response.content:
                     if block['type'] == 'text':
-                        yield conv_append(role='assistant', content=block['text'], meta={'labels': 'hidden'})
+                        yield conv_append(
+                            role='assistant', 
+                            content=block['text'], 
+                            meta={'labels': 'hidden', 'model': response.model},
+                        )
                     elif block['type'] == 'tool_use':
-                        yield conv_append(role='tool_use', content={
-                            'id': block['id'], 'name': block['name'], 'input': block['input'],
-                        }, meta={'labels': 'hidden'})
+                        yield conv_append(
+                            role='tool_use', 
+                            content={'id': block['id'], 'name': block['name'], 'input': block['input']}, 
+                            meta={'labels': 'hidden'},
+                        )
                 for tool_call in response.tool_calls:
                     result = yield shell(
                         tool_call.input['command'],
@@ -50,11 +56,17 @@ def chat():
                     )
                     output = result.stdout.strip() or result.stderr.strip() or '(no output)'
                     if result.exit_code != 0: output = f'exit code {result.exit_code}\n{output}'
-                    yield conv_append(role='tool_result', content={
-                        'tool_use_id': tool_call.id, 'output': output,
-                    }, meta={'labels': 'hidden'})
+                    yield conv_append(
+                        role='tool_result', 
+                        content={'tool_use_id': tool_call.id, 'output': output}, 
+                        meta={'labels': 'hidden'}
+                    )
             else:
-                yield conv_append(role='assistant', content=response.text)
+                yield conv_append(
+                    role='assistant', 
+                    content=response.text, 
+                    meta={'model': response.model}
+                )
                 yield ai_response(response.text)
                 break
 

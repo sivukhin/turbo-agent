@@ -5,6 +5,7 @@ from workflows.event_handlers.conversation import (
     ConvAppendRequestHandler, ConvListRequestHandler, ConvReadRequestHandler,
     ConvReplaceWithRequestHandler,
 )
+from workflows.event_handlers.user_prompt import UserPromptResultHandler
 
 DEFAULT_EVENT_HANDLERS = [
     ShellRequestHandler(),
@@ -15,6 +16,7 @@ DEFAULT_EVENT_HANDLERS = [
     ConvListRequestHandler(),
     ConvReadRequestHandler(),
     ConvReplaceWithRequestHandler(),
+    UserPromptResultHandler(),
 ]
 
 __all__ = [

@@ -37,10 +37,31 @@ class LlmRequestHandler:
         payload = event.payload
         provider = self._get_provider(payload.model)
         model_name = self._get_model_name(payload.model)
+
+        # Resolve messages: from conversation_ref or inline
+        if payload.conversation_ref and store:
+            from workflows.conversation import MessageRef
+            ref = payload.conversation_ref
+            msg_refs = store.conv_list_messages(
+                ref['conversation_id'], ref.get('message_id'), ref.get('layer'),
+            )
+            conv_msgs = store.conv_read_messages(msg_refs)
+            messages = [{'role': m.role, 'content': m.content} for m in conv_msgs]
+            # Extract system messages
+            system = payload.system
+            system_parts = [m['content'] for m in messages if m['role'] == 'system']
+            messages = [m for m in messages if m['role'] != 'system']
+            if system_parts:
+                combined = '\n'.join(system_parts)
+                system = f'{system}\n{combined}' if system else combined
+        else:
+            messages = payload.messages or []
+            system = payload.system
+
         result = provider.complete(
-            messages=payload.messages, model=model_name,
+            messages=messages, model=model_name,
             max_tokens=payload.max_tokens, temperature=payload.temperature,
-            system=payload.system, tools=payload.tools,
+            system=system, tools=payload.tools,
         )
         resolve_wf(state, event.workflow_id, result)
         return [make_inbox_event(event, ev.LlmResponse(

@@ -9,6 +9,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from workflows import Engine, EngineConfig, Store, load_workflows_from_file
+import workflows.events as ev
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'executions.db')
@@ -69,7 +70,7 @@ def cmd_start(args):
 
     console.print(f'[bold]Started execution[/] [cyan]{execution_id}[/]')
     console.print(f'  workflow: [bold]{wf_name}[/]({", ".join(args.args)})')
-    _print_step_events(inbox, outbox)
+    _print_step_events(inbox, outbox, trace=True)
 
 
 def cmd_step(args):
@@ -96,20 +97,76 @@ def cmd_step(args):
     state, _ = store.load_state(args.id)
     new_inbox = store.read_inbox(args.id, after_event_id=last_inbox)
     new_outbox = store.read_outbox(args.id, after_event_id=last_outbox)
-    store.close()
 
-    _print_step_events(new_inbox, new_outbox)
+    _print_step_events(new_inbox, new_outbox, trace=True)
     if state.finished:
         root = state.workflows[state.root_workflow_id]
         console.print(f'  [bold green]returned:[/] {root.result!r}')
+        store.close()
+        return
+
+    # Check for unanswered user prompts
+    _handle_user_prompts(store, args.id, engine, trace=True)
+    store.close()
 
 
-def _print_step_events(inbox, outbox):
+def _handle_user_prompts(store, execution_id, engine, trace=False):
+    """Check for unanswered UserPromptRequest events, prompt user, send result."""
+    from workflows.events import UserPromptRequest, UserPromptResult
+
+    outbox = store.read_outbox(execution_id)
+    inbox = store.read_inbox(execution_id)
+
+    # Find prompt requests
+    requests = {e.payload.request_id: e
+                for e in outbox if isinstance(e.payload, UserPromptRequest)}
+    # Find already-answered
+    answered = {e.payload.request_id
+                for e in inbox if isinstance(e.payload, UserPromptResult)}
+
+    for request_id, event in requests.items():
+        if request_id in answered:
+            continue
+        # Unanswered prompt — ask the user
+        response = console.input('[bold green]You>[/] ')
+
+        # Write the result to inbox
+        store.append_event(
+            execution_id, event.workflow_id, 'inbox',
+            UserPromptResult(request_id=request_id, response=response),
+        )
+
+        # Process the new event so the workflow can continue
+        engine.step(store, execution_id)
+
+        # Print any new events from this step
+        state, _ = store.load_state(execution_id)
+        new_outbox = store.read_outbox(execution_id, after_event_id=event.event_id)
+        new_inbox = store.read_inbox(execution_id, after_event_id=event.event_id)
+        _print_step_events(
+            [e for e in new_inbox if not isinstance(e.payload, UserPromptResult)],
+            [e for e in new_outbox if not isinstance(e.payload, UserPromptRequest)],
+            trace=trace,
+        )
+        if state.finished:
+            root = state.workflows[state.root_workflow_id]
+            console.print(f'  [bold green]returned:[/] {root.result!r}')
+
+
+def _print_step_events(inbox, outbox, trace=False):
     all_events = sorted(inbox + outbox, key=lambda e: e.event_id)
     for event in all_events:
+        payload = event.payload
+        if not trace:
+            # In non-trace mode, only show user-facing events
+            if isinstance(payload, ev.AiResponseEvent):
+                console.print(f'[bold blue]Assistant>[/] {payload.text}')
+                continue
+            # Skip everything else
+            continue
         wf_id = (event.workflow_id or '-')[:8]
         cat_style = _category_style(event.category)
-        payload_str = _format_payload(event.payload)
+        payload_str = _format_payload(payload)
         console.print(
             f'  [{cat_style}]{event.category:<6}[/] [dim]{wf_id}[/] '
             f'[bold]{event.type}[/] {payload_str}'
@@ -221,6 +278,13 @@ def _format_payload(payload):
         return f'{payload.mode}({deps})'
     if isinstance(payload, ev.SleepStarted):
         return f'{payload.seconds}s (wake_at={payload.wake_at})'
+    if isinstance(payload, ev.UserPromptRequest):
+        return f'[{payload.request_id[:8]}] waiting for input'
+    if isinstance(payload, ev.UserPromptResult):
+        return f'[{payload.request_id[:8]}] {payload.response!r}'
+    if isinstance(payload, ev.AiResponseEvent):
+        text = payload.text[:80] + ('...' if len(payload.text) > 80 else '')
+        return text
     if isinstance(payload, ev.WorkflowSpawned):
         parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else '-'
         return f'{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}'
@@ -233,22 +297,23 @@ def _format_payload(payload):
         return f'conv={payload.conversation_id[:8]}'
     if isinstance(payload, ev.ConvReadResult):
         return f'{payload.count} messages'
-    if isinstance(payload, ev.ConvSearchRequest):
-        return f'pattern={payload.pattern!r}'
-    if isinstance(payload, ev.ConvSearchResult):
-        return f'{payload.count} matches'
-    if isinstance(payload, ev.ConvGetRequest):
-        return f'{len(payload.message_refs)} refs'
-    if isinstance(payload, ev.ConvGetResult):
+    if isinstance(payload, ev.ConvListRequest):
+        return f'conv={payload.conversation_id[:8]}'
+    if isinstance(payload, ev.ConvListResult):
         return f'{payload.count} messages'
     if isinstance(payload, ev.ConvReplaceWithRequest):
         return f'{len(payload.new_messages)} new msgs'
     if isinstance(payload, ev.ConvReplaceWithResult):
         return f'layer={payload.new_layer} {len(payload.new_message_refs)} msgs'
     if isinstance(payload, ev.LlmRequest):
-        n_msgs = len(payload.messages)
+        if payload.conversation_ref:
+            n_msgs = payload.message_count or '?'
+            src = f'conv={payload.conversation_ref["conversation_id"][:8]}'
+        else:
+            n_msgs = len(payload.messages) if payload.messages else 0
+            src = 'messages'
         tools = f', {len(payload.tools)} tools' if payload.tools else ''
-        return f'{payload.model} ({n_msgs} msgs{tools}, T={payload.temperature})'
+        return f'{payload.model} ({src}, {n_msgs} msgs{tools}, T={payload.temperature})'
     if isinstance(payload, ev.LlmResponse):
         texts = [b['text'][:60] for b in payload.content if b.get('type') == 'text']
         tool_calls = [b['name'] for b in payload.content if b.get('type') == 'tool_use']
@@ -440,6 +505,96 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
     console.print(table)
 
 
+def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
+    """Run an execution to completion, handling user prompts interactively.
+    Handles Ctrl+C gracefully — state is always persisted."""
+    last_event = 0
+    interrupted = False
+    try:
+        for _ in range(max_steps):
+            state, _ = store.load_state(execution_id)
+            if state.finished:
+                break
+
+            all_new = store.read_all_events(execution_id, after_event_id=last_event)
+            if all_new:
+                last_event = all_new[-1].event_id
+                _print_step_events(
+                    [e for e in all_new if e.category == 'inbox'],
+                    [e for e in all_new if e.category == 'outbox'],
+                    trace=trace,
+                )
+
+            _handle_user_prompts(store, execution_id, engine, trace=trace)
+
+            state, _ = store.load_state(execution_id)
+            if state.finished:
+                break
+
+            engine.step(store, execution_id)
+
+    except KeyboardInterrupt:
+        interrupted = True
+
+    # Final events
+    state, _ = store.load_state(execution_id)
+    all_new = store.read_all_events(execution_id, after_event_id=last_event)
+    if all_new:
+        _print_step_events(
+            [e for e in all_new if e.category == 'inbox'],
+            [e for e in all_new if e.category == 'outbox'],
+            trace=trace,
+        )
+
+    if interrupted:
+        console.print(f'\n  [yellow]Paused[/] [cyan]{execution_id}[/] — resume with: '
+                       f'[bold]main.py continue {execution_id}[/]')
+    elif state.finished:
+        root = state.workflows[state.root_workflow_id]
+        console.print(f'\n  [bold green]returned:[/] {root.result!r}')
+    else:
+        console.print(f'\n  [yellow]Did not finish after {max_steps} steps[/]')
+
+
+def cmd_run(args):
+    """Start a workflow and run it to completion."""
+    file_path, wf_name = _parse_target(args.target)
+    registry = _load_registry(file_path)
+    if wf_name not in registry:
+        console.print(f'[red]Unknown workflow:[/] {wf_name}')
+        console.print(f'Available in {file_path}: {", ".join(registry)}')
+        sys.exit(1)
+
+    parsed_args = [json.loads(a) for a in args.args]
+    store = Store(DB_PATH)
+    engine = Engine(EngineConfig(workflows_registry=registry))
+    workdir = os.path.abspath(args.workdir)
+    os.makedirs(workdir, exist_ok=True)
+    execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path,
+                                workdir=workdir)
+
+    trace = getattr(args, 'trace', False)
+    console.print(f'[bold]Running[/] [cyan]{execution_id}[/] {wf_name}({", ".join(args.args)})')
+    _run_loop(store, engine, execution_id, trace=trace)
+    store.close()
+
+
+def cmd_continue(args):
+    """Continue a paused execution to completion."""
+    store = Store(DB_PATH)
+    registry, state = _load_registry_for_execution(store, args.id)
+    if state.finished:
+        store.close()
+        console.print(f'[yellow]Execution {args.id} already finished[/]')
+        sys.exit(1)
+
+    trace = getattr(args, 'trace', False)
+    engine = Engine(EngineConfig(workflows_registry=registry))
+    console.print(f'[bold]Continuing[/] [cyan]{args.id}[/]')
+    _run_loop(store, engine, args.id, trace=trace)
+    store.close()
+
+
 def cmd_list(args):
     store = Store(DB_PATH)
     all_execs = store.list_executions()
@@ -493,13 +648,24 @@ def main():
     p_conv.add_argument('id', help='Execution ID')
     p_conv.add_argument('conversation_id', nargs='?', help='Conversation ID prefix (default: all)')
 
+    p_run = sub.add_parser('run', help='Start and run a workflow to completion (interactive)')
+    p_run.add_argument('target', help='file.py:workflow_name')
+    p_run.add_argument('args', nargs='*', help='JSON-encoded arguments')
+    p_run.add_argument('-w', '--workdir', default='.workspace',
+                       help='Working directory (default: .workspace)')
+    p_run.add_argument('--trace', action='store_true', help='Show all events (not just user-facing)')
+
+    p_continue = sub.add_parser('continue', help='Continue a paused execution to completion')
+    p_continue.add_argument('id', help='Execution ID')
+    p_continue.add_argument('--trace', action='store_true', help='Show all events')
+
     sub.add_parser('list', help='List all executions')
 
     args = parser.parse_args()
     cmds = {
         'start': cmd_start, 'step': cmd_step, 'status': cmd_status,
         'events': cmd_events, 'inspect': cmd_inspect, 'conv': cmd_conv,
-        'list': cmd_list,
+        'run': cmd_run, 'continue': cmd_continue, 'list': cmd_list,
     }
     cmds[args.command](args)
 

@@ -29,6 +29,14 @@ class WriteFileOp:
     content: str
 
 @dataclass
+class UserPromptOp:
+    pass
+
+@dataclass
+class AiResponseOp:
+    text: str
+
+@dataclass
 class AiOp:
     messages: list | None = None
     conversation: object = None
@@ -61,6 +69,14 @@ def read_file(path):
 
 def write_file(path, content):
     return WriteFileOp(path=path, content=content)
+
+def user_prompt():
+    """Wait for user input. Blocks until answered externally. Returns the response string."""
+    return UserPromptOp()
+
+def ai_response(text):
+    """Emit an AI response for display. Does not block."""
+    return AiResponseOp(text=text)
 
 def ai(messages=None, *, conversation=None,
         model='anthropic/claude-sonnet-4-20250514', max_tokens=None,

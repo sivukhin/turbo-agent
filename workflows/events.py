@@ -71,13 +71,16 @@ class WorkflowSpawned:
 
 @dataclass
 class LlmRequest:
-    """Request to an LLM. Provider-agnostic."""
-    messages: list          # [{"role": "user"|"assistant"|"system", "content": str|list}]
+    """Request to an LLM. Provider-agnostic.
+    Either conversation_ref (lightweight) or messages (full) is set, not both."""
     model: str = 'anthropic/claude-sonnet-4-20250514'
     max_tokens: int | None = None
     temperature: float = 0.0
     system: str | None = None
-    tools: list | None = None           # [{"name": str, "description": str, "input_schema": dict}]
+    tools: list | None = None
+    conversation_ref: dict | None = None  # {"conversation_id", "message_id", "layer"} if from conversation
+    message_count: int | None = None      # number of messages (when using conversation_ref)
+    messages: list | None = None          # full messages (only when no conversation)
 
 @dataclass
 class LlmResponse:
@@ -89,6 +92,22 @@ class LlmResponse:
     text: str = ''              # concatenated text from text blocks
     tool_calls: list | None = None  # [{"id": str, "name": str, "input": dict}] parsed tool calls
     message_id: str | None = None
+
+
+# ---- User prompt events ----
+
+@dataclass
+class UserPromptRequest:
+    request_id: str
+
+@dataclass
+class UserPromptResult:
+    request_id: str
+    response: str
+
+@dataclass
+class AiResponseEvent:
+    text: str
 
 
 # ---- Conversation events ----
@@ -159,6 +178,7 @@ _ALL_PAYLOADS = [
     WaitStarted, SleepStarted,
     WorkflowSpawned,
     LlmRequest, LlmResponse,
+    UserPromptRequest, UserPromptResult, AiResponseEvent,
     ConvAppendRequest, ConvAppendResult,
     ConvListRequest, ConvListResult,
     ConvReadRequest, ConvReadResult,

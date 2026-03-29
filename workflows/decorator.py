@@ -239,13 +239,14 @@ def workflow(func):
         return DurableGenerator(raw(None, *args), workflow_name=func.__name__, args=args)
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args, storage=None, **kwargs):
         ctx = _current_ctx.get()
         if ctx is not None:
             handle = WorkflowHandle(
                 id=ctx.alloc_id(),
                 workflow_name=func.__name__,
                 args=list(args),
+                storage=storage,
             )
             ctx.new_children.append(handle)
             return handle

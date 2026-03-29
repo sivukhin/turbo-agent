@@ -2,6 +2,7 @@ import pickle
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
 
@@ -16,6 +17,7 @@ class WorkflowHandle:
     id: str
     workflow_name: str
     args: list
+    storage: object = None  # StorageConfig, None means 'same'
 
     def __repr__(self):
         return f'<{self.workflow_name}#{self.id}>'
@@ -51,6 +53,39 @@ def sleep(seconds):
     return SleepOp(seconds=seconds)
 
 
+@dataclass
+class ShellOp:
+    command: str
+    isolation: object = None  # HostIsolation or DockerIsolation
+
+
+@dataclass
+class ReadFileOp:
+    path: str
+
+
+@dataclass
+class WriteFileOp:
+    path: str
+    content: str
+
+
+def shell(command, isolation=None):
+    """Run a shell command in the workflow's workspace.
+    isolation: HostIsolation or DockerIsolation instance."""
+    return ShellOp(command=command, isolation=isolation)
+
+
+def read_file(path):
+    """Read a file from the workflow's workspace."""
+    return ReadFileOp(path=path)
+
+
+def write_file(path, content):
+    """Write a file to the workflow's workspace."""
+    return WriteFileOp(path=path, content=content)
+
+
 # ---- state ----
 
 @dataclass
@@ -58,6 +93,8 @@ class WorkflowState:
     name: str
     args: list
     parent_workflow_id: str | None = None
+    workdir: str | None = None           # absolute path to workspace directory
+    branches: dict | None = None         # {relative_git_repo_path: branch_name}
     checkpoint: dict | None = None
     status: str = 'running'
     result: object = None
@@ -103,12 +140,27 @@ class Engine:
     def __init__(self, registry: dict):
         self.registry = registry
 
-    def start(self, store, workflow_name, args, now=None, source_file=None) -> str:
+    def start(self, store, workflow_name, args, now=None, source_file=None,
+              workdir=None) -> str:
+        """Start a new execution.
+
+        workdir: optional root workspace directory. If provided, the root workflow
+        gets this as its working directory and git branches are scanned.
+        """
         now = now if now is not None else time.time()
         execution_id = _uuid()
         root_workflow_id = _uuid()
+
+        wf_state = WorkflowState(name=workflow_name, args=list(args))
+        if workdir:
+            from workflows.isolation.base import scan_git_branches
+            wf_dir = Path(workdir).resolve() / execution_id / root_workflow_id
+            wf_dir.mkdir(parents=True, exist_ok=True)
+            wf_state.workdir = str(wf_dir)
+            wf_state.branches = scan_git_branches(wf_dir)
+
         state = ExecutionState(
-            workflows={root_workflow_id: WorkflowState(name=workflow_name, args=list(args))},
+            workflows={root_workflow_id: wf_state},
             handlers={},
             root_workflow_id=root_workflow_id,
             source_file=source_file,
@@ -122,10 +174,10 @@ class Engine:
         self._tick_and_process(store, execution_id, now)
 
     def _tick_and_process(self, store, execution_id, now):
-        """Tick running workflows, then process inbox events until stable."""
+        """Tick each running workflow once, write events, process inbox."""
         state, last_processed = store.load_state(execution_id)
 
-        # Tick all running workflows
+        # Tick all running workflows exactly once
         new_events = self._handle_tick(state, execution_id, now)
 
         # Try to resolve handlers (sleep timers, etc.)
@@ -137,18 +189,18 @@ class Engine:
         for e in new_events:
             store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
 
-        # Process any new inbox events (workflow_finished may trigger handlers)
+        # Process new inbox events — only resolve handlers, don't re-tick.
+        # Unblocked workflows will be ticked on the next step().
         self._process_inbox(store, execution_id, now)
 
     def _process_inbox(self, store, execution_id, now):
-        """Process inbox events until no new ones remain."""
+        """Process inbox events: feed to handlers and resolve. No re-ticking."""
         while True:
             state, last_processed = store.load_state(execution_id)
             events = store.read_inbox(execution_id, after_event_id=last_processed)
             if not events:
                 break
 
-            # Feed events to handlers
             for event in events:
                 for handler_wf_id, hs in list(state.handlers.items()):
                     handler_cls = HANDLER_REGISTRY[hs.handler_type]
@@ -156,22 +208,11 @@ class Engine:
                         event.type, event.workflow_id, event.payload, hs.state,
                     )
 
-            # Try to resolve handlers
             self._try_resolve_handlers(state, now)
             self._check_finished(state)
 
             last_event_id = events[-1].event_id
             store.save_state(execution_id, state, last_processed_event_id=last_event_id)
-
-            # If any workflows became running, tick them
-            has_running = any(wf.status == 'running' for wf in state.workflows.values())
-            if has_running:
-                new_events = self._handle_tick(state, execution_id, now)
-                self._try_resolve_handlers(state, now)
-                self._check_finished(state)
-                store.save_state(execution_id, state, last_processed_event_id=last_event_id)
-                for e in new_events:
-                    store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
 
     def _try_resolve_handlers(self, state, now):
         for handler_wf_id in list(state.handlers):
@@ -251,6 +292,68 @@ class Engine:
                     handler_type='sleep',
                     state=handler_cls.initial_state(now + val.seconds),
                 )
+            elif isinstance(val, ShellOp):
+                if not wf.workdir:
+                    raise RuntimeError(f'Workflow {workflow_id} has no workdir configured')
+                isolation = val.isolation
+                if isolation is None:
+                    raise RuntimeError('ShellOp requires an isolation instance')
+                workdir = Path(wf.workdir)
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    type='shell_request',
+                    payload={'command': val.command, 'workdir': str(workdir)},
+                ))
+                result = isolation.run_shell(workdir, val.command)
+                from workflows.isolation.base import scan_git_branches
+                wf.branches = scan_git_branches(workdir)
+                wf.send_val = result
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    type='shell_result',
+                    payload={'command': val.command, 'exit_code': result.exit_code,
+                             'stdout': result.stdout, 'stderr': result.stderr},
+                ))
+            elif isinstance(val, ReadFileOp):
+                if not wf.workdir:
+                    raise RuntimeError(f'Workflow {workflow_id} has no workdir configured')
+                file_path = Path(wf.workdir) / val.path
+                content = file_path.read_text()
+                wf.send_val = content
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    type='file_read_request',
+                    payload={'path': val.path, 'workdir': wf.workdir},
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    type='file_read_result',
+                    payload={'path': val.path, 'content': content},
+                ))
+            elif isinstance(val, WriteFileOp):
+                if not wf.workdir:
+                    raise RuntimeError(f'Workflow {workflow_id} has no workdir configured')
+                file_path = Path(wf.workdir) / val.path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(val.content)
+                wf.send_val = None
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    type='file_write_request',
+                    payload={'path': val.path, 'content': val.content,
+                             'workdir': wf.workdir},
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    type='file_write_result',
+                    payload={'path': val.path, 'size': len(val.content)},
+                ))
             else:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
@@ -263,8 +366,28 @@ class Engine:
 
     def _register_children(self, state, ctx, new_events, execution_id, parent_workflow_id):
         for handle in ctx.new_children:
-            state.workflows[handle.id] = WorkflowState(
-                name=handle.workflow_name,
-                args=list(handle.args),
-                parent_workflow_id=parent_workflow_id,
+            self._register_child(state, handle, execution_id, parent_workflow_id)
+
+    def _register_child(self, state, handle, execution_id, parent_workflow_id):
+        from workflows.isolation.base import StorageConfig, setup_child_workspace
+        parent_wf = state.workflows.get(parent_workflow_id) if parent_workflow_id else None
+
+        child_wf = WorkflowState(
+            name=handle.workflow_name,
+            args=list(handle.args),
+            parent_workflow_id=parent_workflow_id,
+        )
+
+        if parent_wf and parent_wf.workdir:
+            config = handle.storage or StorageConfig(mode='same')
+            parent_dir = Path(parent_wf.workdir)
+            child_dir = parent_dir.parent / handle.id
+
+            child_workdir, child_branches = setup_child_workspace(
+                parent_dir, child_dir,
+                parent_wf.branches, config,
             )
+            child_wf.workdir = str(child_workdir)
+            child_wf.branches = child_branches
+
+        state.workflows[handle.id] = child_wf

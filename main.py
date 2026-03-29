@@ -58,7 +58,10 @@ def cmd_start(args):
     parsed_args = [json.loads(a) for a in args.args]
     store = Store(DB_PATH)
     engine = Engine(registry)
-    execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path)
+    workdir = os.path.abspath(args.workdir)
+    os.makedirs(workdir, exist_ok=True)
+    execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path,
+                                workdir=workdir)
 
     outbox = store.read_outbox(execution_id)
     store.close()
@@ -178,6 +181,32 @@ def _format_payload(event_type, payload):
         return repr(payload.get('value', ''))
     if event_type == 'workflow_finished':
         return f'result={payload.get("result")!r}'
+    if event_type == 'shell_request':
+        return f'$ {payload.get("command", "")}'
+    if event_type == 'shell_result':
+        code = payload.get('exit_code', '?')
+        out = payload.get('stdout', '').strip()
+        err = payload.get('stderr', '').strip()
+        parts = [f'exit={code}']
+        if out:
+            parts.append(f'stdout={out!r}')
+        if err:
+            parts.append(f'stderr={err!r}')
+        return ', '.join(parts)
+    if event_type == 'file_read_request':
+        return f'read {payload.get("path", "?")}'
+    if event_type == 'file_read_result':
+        content = payload.get('content', '')
+        if len(content) > 80:
+            content = content[:77] + '...'
+        return f'{payload.get("path", "?")}: {content!r}'
+    if event_type == 'file_write_request':
+        content = payload.get('content', '')
+        if len(content) > 80:
+            content = content[:77] + '...'
+        return f'write {payload.get("path", "?")}: {content!r}'
+    if event_type == 'file_write_result':
+        return f'{payload.get("path", "?")} ({payload.get("size", "?")} bytes)'
     return repr(payload) if payload else ''
 
 
@@ -285,6 +314,8 @@ def main():
     p_start = sub.add_parser('start', help='Start a new workflow execution')
     p_start.add_argument('target', help='file.py:workflow_name')
     p_start.add_argument('args', nargs='*', help='JSON-encoded arguments')
+    p_start.add_argument('-w', '--workdir', default='.workspace',
+                         help='Working directory for the root workflow (default: .workspace)')
 
     p_step = sub.add_parser('step', help='Advance all active workflows one tick')
     p_step.add_argument('id', help='Execution ID')

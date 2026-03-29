@@ -1,3 +1,5 @@
+import json
+
 from dotenv import load_dotenv
 
 from workflows.event_handlers.base import resolve_wf, make_inbox_event, register_event_handler
@@ -11,6 +13,30 @@ DEFAULT_PROVIDERS = {
     'anthropic': AnthropicProvider(),
     'openai': OpenAIProvider(),
 }
+
+
+def _conv_to_llm_messages(conv_msgs):
+    """Convert internal conversation messages to LLM API format.
+
+    Internal roles tool_use/tool_result are converted:
+      - tool_use → assistant message with tool_use content block
+      - tool_result → user message with tool_result content block
+    """
+    result = []
+    for m in conv_msgs:
+        if m.role == 'tool_use':
+            data = json.loads(m.content) if isinstance(m.content, str) else m.content
+            result.append({'role': 'assistant', 'content': [
+                {'type': 'tool_use', 'id': data['id'], 'name': data['name'], 'input': data['input']},
+            ]})
+        elif m.role == 'tool_result':
+            data = json.loads(m.content) if isinstance(m.content, str) else m.content
+            result.append({'role': 'user', 'content': [
+                {'type': 'tool_result', 'tool_use_id': data['tool_use_id'], 'content': data['output']},
+            ]})
+        else:
+            result.append({'role': m.role, 'content': m.content})
+    return result
 
 
 @register_event_handler(ev.LlmRequest)
@@ -46,7 +72,7 @@ class LlmRequestHandler:
                 ref['conversation_id'], ref.get('message_id'), ref.get('layer'),
             )
             conv_msgs = store.conv_read_messages(msg_refs)
-            messages = [{'role': m.role, 'content': m.content} for m in conv_msgs]
+            messages = _conv_to_llm_messages(conv_msgs)
             # Extract system messages
             system = payload.system
             system_parts = [m['content'] for m in messages if m['role'] == 'system']

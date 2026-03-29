@@ -16,7 +16,7 @@ class ConvAppendOpHandler:
             workflow_id=ctx.workflow_id, category='outbox',
             payload=ev.ConvAppendRequest(
                 conversation_id=ctx.wf.conversation_id,
-                role=val.role, content=val.content),
+                role=val.role, content=val.content, meta=val.meta),
         ))
 
 
@@ -57,7 +57,8 @@ class ConvReadOpHandler:
             payload=ev.ConvReadRequest(
                 message_refs=[{'conversation_id': r.conversation_id,
                                'message_id': r.message_id,
-                               'layer': r.layer, 'role': r.role}
+                               'layer': r.layer, 'role': r.role,
+                               'meta': r.meta}
                               for r in val.refs]),
         ))
 

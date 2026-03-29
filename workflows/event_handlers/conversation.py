@@ -7,11 +7,11 @@ import workflows.events as ev
 class ConvAppendRequestHandler:
     def handle(self, event, store, state):
         payload = event.payload
-        ref = store.conv_append_message(payload.conversation_id, payload.role, payload.content)
+        ref = store.conv_append_message(payload.conversation_id, payload.role, payload.content, meta=payload.meta)
         resolve_wf(state, event.workflow_id, ref)
         return [make_inbox_event(event, ev.ConvAppendResult(
             conversation_id=ref.conversation_id,
-            message_id=ref.message_id, layer=ref.layer, role=ref.role,
+            message_id=ref.message_id, layer=ref.layer, role=ref.role, meta=ref.meta,
         ))]
 
 
@@ -29,7 +29,8 @@ class ConvListRequestHandler:
             count=len(refs),
             message_refs=[{'conversation_id': r.conversation_id,
                            'message_id': r.message_id,
-                           'layer': r.layer, 'role': r.role} for r in refs],
+                           'layer': r.layer, 'role': r.role,
+                           'meta': r.meta} for r in refs],
         ))]
 
 
@@ -37,7 +38,10 @@ class ConvListRequestHandler:
 class ConvReadRequestHandler:
     def handle(self, event, store, state):
         payload = event.payload
-        refs = [MessageRef(**r) for r in payload.message_refs]
+        refs = [MessageRef(
+            conversation_id=r['conversation_id'], message_id=r['message_id'],
+            layer=r['layer'], role=r['role'], meta=r.get('meta', {}),
+        ) for r in payload.message_refs]
         messages = store.conv_read_messages(refs)
         resolve_wf(state, event.workflow_id, messages)
         return [make_inbox_event(event, ev.ConvReadResult(count=len(messages)))]
@@ -57,5 +61,6 @@ class ConvReplaceWithRequestHandler:
             new_layer=new_refs[0].layer if new_refs else 0,
             new_message_refs=[{'conversation_id': r.conversation_id,
                                'message_id': r.message_id,
-                               'layer': r.layer, 'role': r.role} for r in new_refs],
+                               'layer': r.layer, 'role': r.role,
+                               'meta': r.meta} for r in new_refs],
         ))]

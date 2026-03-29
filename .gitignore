@@ -3,3 +3,5 @@
 *.db-shm
 __pycache__/
 .workspace
+node_modules/
+dist/

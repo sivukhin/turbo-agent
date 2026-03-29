@@ -478,27 +478,43 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
         'user': 'green',
         'assistant': 'blue',
         'system': 'yellow',
+        'tool_use': 'purple',
         'tool_result': 'magenta',
     }
 
     table = Table(show_lines=False, show_header=True, padding=(0, 1))
     table.add_column('#', style='dim', width=4)
-    table.add_column('role', width=10)
+    table.add_column('role', width=12)
     table.add_column('content')
     table.add_column('ref', style='dim', width=12)
 
     for i, msg in enumerate(messages):
+        labels = msg.ref.meta.get('labels', '')
+        if 'hidden' in labels.split(','):
+            continue
         style = role_style.get(msg.role, 'white')
         content = msg.content
+        if msg.role == 'tool_use':
+            try:
+                data = json.loads(content)
+                content = f"[bold purple]{data.get('name', '?')}[/] {json.dumps(data.get('input', {}))}"
+            except Exception:
+                pass
+        elif msg.role == 'tool_result':
+            try:
+                data = json.loads(content)
+                content = f"[dim]{data.get('tool_use_id', '')}[/] {data.get('output', content)}"
+            except Exception:
+                pass
         if len(content) > 120:
             content = content[:117] + '...'
-        # Show if message came from parent conversation
         from_parent = msg.ref.conversation_id != conversation_id
         parent_tag = ' [dim](parent)[/]' if from_parent else ''
+        label_tag = f' [dim][{labels}][/]' if labels else ''
         table.add_row(
             str(i),
             Text(msg.role, style=style),
-            content + parent_tag,
+            content + parent_tag + label_tag,
             msg.ref.message_id[:10],
         )
 
@@ -661,13 +677,26 @@ def main():
 
     sub.add_parser('list', help='List all executions')
 
+    p_web = sub.add_parser('web', help='Start the web UI')
+    p_web.add_argument('--port', type=int, default=8080, help='Port (default: 8080)')
+    p_web.add_argument('--host', default='0.0.0.0', help='Host (default: 0.0.0.0)')
+
     args = parser.parse_args()
     cmds = {
         'start': cmd_start, 'step': cmd_step, 'status': cmd_status,
         'events': cmd_events, 'inspect': cmd_inspect, 'conv': cmd_conv,
         'run': cmd_run, 'continue': cmd_continue, 'list': cmd_list,
+        'web': cmd_web,
     }
     cmds[args.command](args)
+
+
+def cmd_web(args):
+    """Start the web UI."""
+    import uvicorn
+    os.environ['TURBO_DB'] = DB_PATH
+    console.print(f'[bold]Starting web UI[/] on http://{args.host}:{args.port}')
+    uvicorn.run('web.server:app', host=args.host, port=args.port, reload=False)
 
 
 if __name__ == '__main__':

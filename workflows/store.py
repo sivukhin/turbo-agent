@@ -1,3 +1,4 @@
+import json
 import pickle
 import uuid
 import turso
@@ -49,6 +50,7 @@ class Store:
                 tombstone INTEGER NOT NULL DEFAULT 0,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                meta TEXT NOT NULL DEFAULT '{}',
                 PRIMARY KEY (conversation_id, message_id, layer)
             );
 
@@ -176,18 +178,21 @@ class Store:
         self.conn.commit()
 
     def conv_append_message(self, conversation_id: str, role: str,
-                            content: str) -> MessageRef:
+                            content, meta: dict | None = None) -> MessageRef:
+        if not isinstance(content, str):
+            content = json.dumps(content)
         message_id = _sortable_uuid()
+        meta = meta or {}
         cur = self.conn.cursor()
         cur.execute(
             """INSERT INTO conversations
-               (conversation_id, message_id, layer, tombstone, role, content)
-               VALUES (?, ?, 0, 0, ?, ?)""",
-            (conversation_id, message_id, role, content),
+               (conversation_id, message_id, layer, tombstone, role, content, meta)
+               VALUES (?, ?, 0, 0, ?, ?, ?)""",
+            (conversation_id, message_id, role, content, json.dumps(meta)),
         )
         self.conn.commit()
         return MessageRef(conversation_id=conversation_id, message_id=message_id,
-                          layer=0, role=role)
+                          layer=0, role=role, meta=meta)
 
     def conv_list_messages(self, conversation_id: str,
                            end_message_id: str | None = None,
@@ -237,14 +242,14 @@ class Store:
 
         where = " AND ".join(conditions)
         cur.execute(
-            f"SELECT message_id, layer, tombstone, role "
+            f"SELECT message_id, layer, tombstone, role, meta "
             f"FROM conversations WHERE {where} ORDER BY message_id, layer DESC",
             params,
         )
 
         refs = []
         seen = set()
-        for msg_id, layer, tombstone, role in cur.fetchall():
+        for msg_id, layer, tombstone, role, meta_str in cur.fetchall():
             if msg_id in seen:
                 continue
             seen.add(msg_id)
@@ -263,7 +268,8 @@ class Store:
                 row = cur2.fetchone()
                 if row and pattern.replace('%', '') not in row[0]:
                     continue
-            refs.append(MessageRef(conversation_id, msg_id, layer, role))
+            meta = json.loads(meta_str) if meta_str else {}
+            refs.append(MessageRef(conversation_id, msg_id, layer, role, meta))
 
         refs.sort(key=lambda r: r.message_id)
         return refs
@@ -274,13 +280,18 @@ class Store:
         cur = self.conn.cursor()
         for ref in refs:
             cur.execute(
-                "SELECT content FROM conversations "
+                "SELECT content, meta FROM conversations "
                 "WHERE conversation_id = ? AND message_id = ? AND layer = ?",
                 (ref.conversation_id, ref.message_id, ref.layer),
             )
             row = cur.fetchone()
             if row:
-                results.append(Message(ref=ref, content=row[0]))
+                meta = json.loads(row[1]) if row[1] else {}
+                enriched_ref = MessageRef(
+                    ref.conversation_id, ref.message_id, ref.layer,
+                    ref.role, meta,
+                )
+                results.append(Message(ref=enriched_ref, content=row[0]))
         return results
 
     def conv_replace_with(self, conversation_id: str,
@@ -326,13 +337,14 @@ class Store:
             seq = base_seq + i
             rand = uuid.uuid4().hex[:8]
             msg_id = f'{base_ts}-{seq:08x}-{rand}'
+            meta = msg.get('meta', {})
             cur.execute(
                 """INSERT INTO conversations
-                   (conversation_id, message_id, layer, tombstone, role, content)
-                   VALUES (?, ?, ?, 0, ?, ?)""",
-                (conversation_id, msg_id, new_layer, msg['role'], msg['content']),
+                   (conversation_id, message_id, layer, tombstone, role, content, meta)
+                   VALUES (?, ?, ?, 0, ?, ?, ?)""",
+                (conversation_id, msg_id, new_layer, msg['role'], msg['content'], json.dumps(meta)),
             )
-            new_refs.append(MessageRef(conversation_id, msg_id, new_layer, msg['role']))
+            new_refs.append(MessageRef(conversation_id, msg_id, new_layer, msg['role'], meta))
 
         self.conn.commit()
         return new_refs

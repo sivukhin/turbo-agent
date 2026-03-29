@@ -15,7 +15,9 @@ import workflows.events as ev
 
 
 def _uuid():
-    return uuid.uuid4().hex[:12]
+    """Time-sortable UUID: timestamp prefix + random suffix."""
+    ts = int(time.time() * 1000)
+    return f'{ts:012x}{uuid.uuid4().hex[:4]}'
 
 
 from dataclasses import dataclass as _dataclass, field as _field

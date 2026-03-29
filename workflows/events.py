@@ -6,7 +6,7 @@ discriminator so payloads can be reconstructed from storage.
 
 import json
 import re
-from dataclasses import dataclass, fields, asdict
+from dataclasses import dataclass, field, fields, asdict
 
 
 # ---- payload types ----
@@ -117,6 +117,7 @@ class ConvAppendRequest:
     conversation_id: str
     role: str
     content: str
+    meta: dict = field(default_factory=dict)
 
 @dataclass
 class ConvAppendResult:
@@ -124,6 +125,7 @@ class ConvAppendResult:
     message_id: str
     layer: int
     role: str
+    meta: dict = field(default_factory=dict)
 
 @dataclass
 class ConvListRequest:

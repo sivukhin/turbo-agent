@@ -38,6 +38,7 @@ class MessageRef:
     message_id: str
     layer: int
     role: str
+    meta: dict = field(default_factory=dict)  # arbitrary JSON metadata; well-known key: "labels" (comma-separated)
 
 
 @dataclass
@@ -71,7 +72,8 @@ Latest = _LatestType()
 @dataclass
 class ConvAppendOp:
     role: str
-    content: str
+    content: object
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -99,9 +101,9 @@ class ConvReplaceWithOp:
 
 # ---- Yield functions ----
 
-def conv_append(role, content):
-    """Append a message. Returns MessageRef."""
-    return ConvAppendOp(role=role, content=content)
+def conv_append(role, content, meta=None):
+    """Append a message. Returns MessageRef. Content can be str or dict/list (auto-serialized to JSON)."""
+    return ConvAppendOp(role=role, content=content, meta=meta or {})
 
 
 def conv_list(conversation=None, start_message_id=None, end_message_id=None,

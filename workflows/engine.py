@@ -300,7 +300,7 @@ class Engine:
             send_val = wf.send_val
             wf.send_val = None
 
-            ctx = _TickContext(alloc_id=lambda: _uuid())
+            ctx = _TickContext()
             token = _current_ctx.set(ctx)
 
             try:

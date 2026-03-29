@@ -2,6 +2,7 @@ import pickle
 import types
 import functools
 import contextvars
+import uuid
 from bytecode import (
     Bytecode, Instr, Label, ControlFlowGraph,
     TryBegin, TryEnd, Compare, BinaryOp,
@@ -17,9 +18,8 @@ _current_ctx = contextvars.ContextVar('workflow_ctx', default=None)
 
 
 class _TickContext:
-    def __init__(self, alloc_id):
+    def __init__(self):
         self.new_children = []
-        self.alloc_id = alloc_id
 
 
 def _unpack_checkpoint(cp, varnames):
@@ -243,7 +243,7 @@ def workflow(func):
         ctx = _current_ctx.get()
         if ctx is not None:
             handle = WorkflowHandle(
-                id=ctx.alloc_id(),
+                id=uuid.uuid4().hex[:12],
                 workflow_name=func.__name__,
                 args=list(args),
                 storage=storage,

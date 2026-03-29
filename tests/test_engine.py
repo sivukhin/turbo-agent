@@ -255,7 +255,7 @@ class TestEngineBasic:
         assert not state.finished
         outbox = store.read_outbox(eid)
         assert len(outbox) == 1
-        assert outbox[0].payload['value'] == 0
+        assert outbox[0].payload.value == 0
 
     def test_step_to_completion(self, env):
         engine, store = env
@@ -577,7 +577,7 @@ class TestEventLog:
         engine.step(store, eid)
         engine.step(store, eid)
         outbox = store.read_outbox(eid)
-        values = [m.payload['value'] for m in outbox if m.type == 'workflow_yielded']
+        values = [m.payload.value for m in outbox if m.type == 'workflow_yielded']
         assert values[:3] == [0, 1, 2]
 
     def test_inbox_records_finished(self, env):
@@ -728,14 +728,14 @@ class TestSleep:
         engine, store = env
         eid = engine.start(store, 'sleeper', [], now=0.0)
         outbox = store.read_outbox(eid)
-        values = [m.payload['value'] for m in outbox if m.type == 'workflow_yielded']
+        values = [m.payload.value for m in outbox if m.type == 'workflow_yielded']
         assert 'before sleep' in values
 
         engine.step(store, eid, now=0.0)    # sleep
         engine.step(store, eid, now=10.0)   # wake
         engine.step(store, eid, now=10.0)   # yields 'after sleep'
         outbox = store.read_outbox(eid)
-        values = [m.payload['value'] for m in outbox if m.type == 'workflow_yielded']
+        values = [m.payload.value for m in outbox if m.type == 'workflow_yielded']
         assert 'after sleep' in values
 
     def test_sleep_zero_resolves_immediately(self, env):

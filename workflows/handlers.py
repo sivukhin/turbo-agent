@@ -4,7 +4,11 @@ Each handler has:
   initial_state(args) -> state
   on_event(event_type, event_workflow_id, payload, state) -> state
   try_resolve(state, now) -> (resolved, result)
+
+payload is a typed dataclass from workflows.events.
 """
+
+from workflows.events import WorkflowFinished
 
 
 class WaitHandler:
@@ -17,7 +21,8 @@ class WaitHandler:
     @staticmethod
     def on_event(event_type, event_workflow_id, payload, state):
         if event_type == 'workflow_finished' and event_workflow_id == state['dep']:
-            return {**state, 'result': payload['result'], 'resolved': True}
+            result = payload.result if isinstance(payload, WorkflowFinished) else payload
+            return {**state, 'result': result, 'resolved': True}
         return state
 
     @staticmethod
@@ -37,7 +42,8 @@ class WaitAllHandler:
     @staticmethod
     def on_event(event_type, event_workflow_id, payload, state):
         if event_type == 'workflow_finished' and event_workflow_id in state['deps']:
-            results = {**state['results'], event_workflow_id: payload['result']}
+            result = payload.result if isinstance(payload, WorkflowFinished) else payload
+            results = {**state['results'], event_workflow_id: result}
             return {**state, 'results': results}
         return state
 
@@ -59,7 +65,8 @@ class WaitAnyHandler:
     @staticmethod
     def on_event(event_type, event_workflow_id, payload, state):
         if event_type == 'workflow_finished' and event_workflow_id in state['deps']:
-            results = {**state['results'], event_workflow_id: payload['result']}
+            result = payload.result if isinstance(payload, WorkflowFinished) else payload
+            results = {**state['results'], event_workflow_id: result}
             return {**state, 'results': results}
         return state
 

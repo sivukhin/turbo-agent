@@ -101,11 +101,11 @@ def cmd_step(args):
 
 
 def _print_events(events):
+    from workflows.events import WorkflowYielded
     for event in events:
-        if event.type == 'workflow_yielded':
+        if isinstance(event.payload, WorkflowYielded):
             wf_id = (event.workflow_id or '?')[:8]
-            val = event.payload.get('value')
-            console.print(f'  [dim]{wf_id}[/] [bold]→[/] {val!r}')
+            console.print(f'  [dim]{wf_id}[/] [bold]→[/] {event.payload.value!r}')
 
 
 def cmd_status(args):
@@ -164,50 +164,51 @@ def cmd_events(args):
     for event in all_events:
         cat_style = _category_style(event.category)
         wf_id = (event.workflow_id or '-')[:12]
-        payload_str = _format_payload(event.type, event.payload)
+        from workflows.events import serialize_payload
+        payload_json = serialize_payload(event.payload)
         table.add_row(
             str(event.event_id),
             Text(event.category, style=cat_style),
             event.type,
             wf_id,
-            payload_str,
+            payload_json,
         )
 
     console.print(table)
 
 
-def _format_payload(event_type, payload):
-    if event_type == 'workflow_yielded':
-        return repr(payload.get('value', ''))
-    if event_type == 'workflow_finished':
-        return f'result={payload.get("result")!r}'
-    if event_type == 'shell_request':
-        return f'$ {payload.get("command", "")}'
-    if event_type == 'shell_result':
-        code = payload.get('exit_code', '?')
-        out = payload.get('stdout', '').strip()
-        err = payload.get('stderr', '').strip()
-        parts = [f'exit={code}']
+def _format_payload(payload):
+    from workflows import events as ev
+    if isinstance(payload, ev.WorkflowYielded):
+        return repr(payload.value)
+    if isinstance(payload, ev.WorkflowFinished):
+        return f'result={payload.result!r}'
+    if isinstance(payload, ev.ShellRequest):
+        return f'$ {payload.command}'
+    if isinstance(payload, ev.ShellResult):
+        parts = [f'exit={payload.exit_code}']
+        out = payload.stdout.strip()
+        err = payload.stderr.strip()
         if out:
             parts.append(f'stdout={out!r}')
         if err:
             parts.append(f'stderr={err!r}')
         return ', '.join(parts)
-    if event_type == 'file_read_request':
-        return f'read {payload.get("path", "?")}'
-    if event_type == 'file_read_result':
-        content = payload.get('content', '')
+    if isinstance(payload, ev.FileReadRequest):
+        return f'read {payload.path}'
+    if isinstance(payload, ev.FileReadResult):
+        content = payload.content
         if len(content) > 80:
             content = content[:77] + '...'
-        return f'{payload.get("path", "?")}: {content!r}'
-    if event_type == 'file_write_request':
-        content = payload.get('content', '')
+        return f'{payload.path}: {content!r}'
+    if isinstance(payload, ev.FileWriteRequest):
+        content = payload.content
         if len(content) > 80:
             content = content[:77] + '...'
-        return f'write {payload.get("path", "?")}: {content!r}'
-    if event_type == 'file_write_result':
-        return f'{payload.get("path", "?")} ({payload.get("size", "?")} bytes)'
-    return repr(payload) if payload else ''
+        return f'write {payload.path}: {content!r}'
+    if isinstance(payload, ev.FileWriteResult):
+        return f'{payload.path} ({payload.size} bytes)'
+    return repr(payload)
 
 
 def cmd_inspect(args):

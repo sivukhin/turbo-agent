@@ -1,6 +1,7 @@
 import pickle
 import turso
 from workflows.engine import ExecutionState, Event
+from workflows.events import serialize_payload, deserialize_payload, payload_type_name
 
 
 class Store:
@@ -26,7 +27,7 @@ class Store:
                 workflow_id TEXT,
                 category TEXT NOT NULL,
                 type TEXT NOT NULL,
-                payload BLOB
+                payload TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_inbox
@@ -69,23 +70,26 @@ class Store:
         return pickle.loads(row[0]), row[1]
 
     def append_event(self, execution_id: str, workflow_id: str | None,
-                     category: str, event_type: str, payload: dict):
+                     category: str, payload) -> None:
+        """Append an event. payload is a typed dataclass from workflows.events."""
         cur = self.conn.cursor()
         cur.execute(
             """INSERT INTO events (execution_id, workflow_id, category, type, payload)
                VALUES (?, ?, ?, ?, ?)""",
-            (execution_id, workflow_id, category, event_type, pickle.dumps(payload)),
+            (execution_id, workflow_id, category,
+             payload_type_name(payload), serialize_payload(payload)),
         )
         self.conn.commit()
 
-    def read_inbox(self, execution_id: str, after_event_id: int = 0) -> list[Event]:
+    def _read_events(self, execution_id: str, category: str,
+                     after_event_id: int = 0) -> list[Event]:
         cur = self.conn.cursor()
         cur.execute(
-            """SELECT event_id, execution_id, workflow_id, category, type, payload
+            """SELECT event_id, execution_id, workflow_id, category, payload
                FROM events
-               WHERE execution_id = ? AND category = 'inbox' AND event_id > ?
+               WHERE execution_id = ? AND category = ? AND event_id > ?
                ORDER BY event_id""",
-            (execution_id, after_event_id),
+            (execution_id, category, after_event_id),
         )
         return [
             Event(
@@ -93,32 +97,16 @@ class Store:
                 execution_id=row[1],
                 workflow_id=row[2],
                 category=row[3],
-                type=row[4],
-                payload=pickle.loads(row[5]),
+                payload=deserialize_payload(row[4]),
             )
             for row in cur.fetchall()
         ]
 
+    def read_inbox(self, execution_id: str, after_event_id: int = 0) -> list[Event]:
+        return self._read_events(execution_id, 'inbox', after_event_id)
+
     def read_outbox(self, execution_id: str, after_event_id: int = 0) -> list[Event]:
-        cur = self.conn.cursor()
-        cur.execute(
-            """SELECT event_id, execution_id, workflow_id, category, type, payload
-               FROM events
-               WHERE execution_id = ? AND category = 'outbox' AND event_id > ?
-               ORDER BY event_id""",
-            (execution_id, after_event_id),
-        )
-        return [
-            Event(
-                event_id=row[0],
-                execution_id=row[1],
-                workflow_id=row[2],
-                category=row[3],
-                type=row[4],
-                payload=pickle.loads(row[5]),
-            )
-            for row in cur.fetchall()
-        ]
+        return self._read_events(execution_id, 'outbox', after_event_id)
 
     def list_executions(self) -> list[tuple[str, ExecutionState]]:
         cur = self.conn.cursor()

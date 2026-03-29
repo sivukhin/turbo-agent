@@ -1,6 +1,7 @@
 """Unit tests for handler implementations."""
 
 from workflows.handlers import WaitHandler, WaitAllHandler, WaitAnyHandler, SleepHandler
+from workflows.events import WorkflowFinished
 
 
 class TestWaitHandler:
@@ -10,12 +11,12 @@ class TestWaitHandler:
 
     def test_ignores_unrelated_messages(self):
         state = WaitHandler.initial_state(['dep-1'])
-        state = WaitHandler.on_event('workflow_finished', 'dep-2', {'result': 99}, state)
+        state = WaitHandler.on_event('workflow_finished', 'dep-2', WorkflowFinished(result=99), state)
         assert not state['resolved']
 
     def test_resolves_on_matching_finish(self):
         state = WaitHandler.initial_state(['dep-1'])
-        state = WaitHandler.on_event('workflow_finished', 'dep-1', {'result': 42}, state)
+        state = WaitHandler.on_event('workflow_finished', 'dep-1', WorkflowFinished(result=42), state)
         assert state['resolved']
         resolved, result = WaitHandler.try_resolve(state, 0)
         assert resolved
@@ -40,34 +41,34 @@ class TestWaitAllHandler:
 
     def test_collects_results(self):
         state = WaitAllHandler.initial_state(['a', 'b'])
-        state = WaitAllHandler.on_event('workflow_finished', 'a', {'result': 10}, state)
+        state = WaitAllHandler.on_event('workflow_finished', 'a', WorkflowFinished(result=10), state)
         resolved, _ = WaitAllHandler.try_resolve(state, 0)
         assert not resolved  # still waiting for b
 
-        state = WaitAllHandler.on_event('workflow_finished', 'b', {'result': 20}, state)
+        state = WaitAllHandler.on_event('workflow_finished', 'b', WorkflowFinished(result=20), state)
         resolved, result = WaitAllHandler.try_resolve(state, 0)
         assert resolved
         assert result == [10, 20]
 
     def test_preserves_order(self):
         state = WaitAllHandler.initial_state(['x', 'y', 'z'])
-        state = WaitAllHandler.on_event('workflow_finished', 'z', {'result': 3}, state)
-        state = WaitAllHandler.on_event('workflow_finished', 'x', {'result': 1}, state)
-        state = WaitAllHandler.on_event('workflow_finished', 'y', {'result': 2}, state)
+        state = WaitAllHandler.on_event('workflow_finished', 'z', WorkflowFinished(result=3), state)
+        state = WaitAllHandler.on_event('workflow_finished', 'x', WorkflowFinished(result=1), state)
+        state = WaitAllHandler.on_event('workflow_finished', 'y', WorkflowFinished(result=2), state)
         resolved, result = WaitAllHandler.try_resolve(state, 0)
         assert resolved
         assert result == [1, 2, 3]  # order matches deps, not arrival
 
     def test_single_dep_returns_list(self):
         state = WaitAllHandler.initial_state(['only'])
-        state = WaitAllHandler.on_event('workflow_finished', 'only', {'result': 99}, state)
+        state = WaitAllHandler.on_event('workflow_finished', 'only', WorkflowFinished(result=99), state)
         resolved, result = WaitAllHandler.try_resolve(state, 0)
         assert resolved
         assert result == [99]  # always a list, use wait() for unwrapped
 
     def test_ignores_unrelated(self):
         state = WaitAllHandler.initial_state(['a', 'b'])
-        state = WaitAllHandler.on_event('workflow_finished', 'c', {'result': 0}, state)
+        state = WaitAllHandler.on_event('workflow_finished', 'c', WorkflowFinished(result=0), state)
         resolved, _ = WaitAllHandler.try_resolve(state, 0)
         assert not resolved
 
@@ -86,7 +87,7 @@ class TestWaitAnyHandler:
 
     def test_resolves_on_first_finish(self):
         state = WaitAnyHandler.initial_state(['a', 'b', 'c'])
-        state = WaitAnyHandler.on_event('workflow_finished', 'b', {'result': 42}, state)
+        state = WaitAnyHandler.on_event('workflow_finished', 'b', WorkflowFinished(result=42), state)
         resolved, result = WaitAnyHandler.try_resolve(state, 0)
         assert resolved
         # Returns list: [(False, None), (True, 42), (False, None)]
@@ -94,8 +95,8 @@ class TestWaitAnyHandler:
 
     def test_multiple_finished(self):
         state = WaitAnyHandler.initial_state(['a', 'b', 'c'])
-        state = WaitAnyHandler.on_event('workflow_finished', 'a', {'result': 1}, state)
-        state = WaitAnyHandler.on_event('workflow_finished', 'c', {'result': 3}, state)
+        state = WaitAnyHandler.on_event('workflow_finished', 'a', WorkflowFinished(result=1), state)
+        state = WaitAnyHandler.on_event('workflow_finished', 'c', WorkflowFinished(result=3), state)
         resolved, result = WaitAnyHandler.try_resolve(state, 0)
         assert resolved
         assert result == [(True, 1), (False, None), (True, 3)]
@@ -107,7 +108,7 @@ class TestWaitAnyHandler:
 
     def test_ignores_unrelated(self):
         state = WaitAnyHandler.initial_state(['a', 'b'])
-        state = WaitAnyHandler.on_event('workflow_finished', 'c', {'result': 0}, state)
+        state = WaitAnyHandler.on_event('workflow_finished', 'c', WorkflowFinished(result=0), state)
         resolved, _ = WaitAnyHandler.try_resolve(state, 0)
         assert not resolved
 
@@ -138,5 +139,5 @@ class TestSleepHandler:
         state = SleepHandler.initial_state(1000.0)
         state2 = SleepHandler.on_event('tick', None, {}, state)
         assert state2 == state
-        state3 = SleepHandler.on_event('workflow_finished', 'x', {'result': 1}, state)
+        state3 = SleepHandler.on_event('workflow_finished', 'x', WorkflowFinished(result=1), state)
         assert state3 == state

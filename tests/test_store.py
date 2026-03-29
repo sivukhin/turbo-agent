@@ -1,5 +1,6 @@
 import pytest
 from workflows import workflow, wait, wait_all, wait_any, Engine, Store
+from workflows.events import WorkflowFinished, WorkflowYielded
 
 
 @workflow
@@ -73,18 +74,20 @@ class TestStoreBasic:
 class TestStoreEvents:
     def test_append_and_read_inbox(self, env):
         _, store = env
-        store.append_event('e1', 'w1', 'inbox', 'tick', {'x': 1})
-        store.append_event('e1', 'w2', 'inbox', 'tick', {'x': 2})
+        store.append_event('e1', 'w1', 'inbox', WorkflowFinished(result=1))
+        store.append_event('e1', 'w2', 'inbox', WorkflowFinished(result=2))
         events = store.read_inbox('e1')
         assert len(events) == 2
         assert events[0].workflow_id == 'w1'
         assert events[1].workflow_id == 'w2'
+        assert isinstance(events[0].payload, WorkflowFinished)
+        assert events[0].payload.result == 1
 
     def test_read_after_event_id(self, env):
         _, store = env
-        store.append_event('e1', None, 'inbox', 'tick', {})
-        store.append_event('e1', None, 'inbox', 'tick', {})
-        store.append_event('e1', None, 'inbox', 'tick', {})
+        store.append_event('e1', None, 'inbox', WorkflowFinished(result=0))
+        store.append_event('e1', None, 'inbox', WorkflowFinished(result=1))
+        store.append_event('e1', None, 'inbox', WorkflowFinished(result=2))
         events = store.read_inbox('e1')
         assert len(events) == 3
         events2 = store.read_inbox('e1', after_event_id=events[1].event_id)
@@ -93,17 +96,25 @@ class TestStoreEvents:
 
     def test_outbox_separate_from_inbox(self, env):
         _, store = env
-        store.append_event('e1', None, 'inbox', 'tick', {})
-        store.append_event('e1', 'w1', 'outbox', 'workflow_yielded', {'value': 42})
+        store.append_event('e1', None, 'inbox', WorkflowFinished(result=0))
+        store.append_event('e1', 'w1', 'outbox', WorkflowYielded(value=42))
         assert len(store.read_inbox('e1')) == 1
         assert len(store.read_outbox('e1')) == 1
 
     def test_events_scoped_to_execution(self, env):
         _, store = env
-        store.append_event('e1', None, 'inbox', 'tick', {})
-        store.append_event('e2', None, 'inbox', 'tick', {})
+        store.append_event('e1', None, 'inbox', WorkflowFinished(result=0))
+        store.append_event('e2', None, 'inbox', WorkflowFinished(result=0))
         assert len(store.read_inbox('e1')) == 1
         assert len(store.read_inbox('e2')) == 1
+
+    def test_payload_roundtrip(self, env):
+        _, store = env
+        store.append_event('e1', 'w1', 'outbox', WorkflowYielded(value='hello'))
+        events = store.read_outbox('e1')
+        assert isinstance(events[0].payload, WorkflowYielded)
+        assert events[0].payload.value == 'hello'
+        assert events[0].type == 'workflow_yielded'
 
 
 class TestStoreResume:

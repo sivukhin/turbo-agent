@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
+import workflows.events as ev
 
 
 def _uuid():
@@ -113,8 +114,12 @@ class Event:
     execution_id: str
     workflow_id: str | None
     category: str   # 'inbox' | 'outbox'
-    type: str
-    payload: dict
+    payload: object  # one of the dataclasses from workflows.events
+
+    @property
+    def type(self) -> str:
+        from workflows.events import payload_type_name
+        return payload_type_name(self.payload)
 
 
 @dataclass
@@ -187,7 +192,7 @@ class Engine:
         # Write events and save state
         store.save_state(execution_id, state, last_processed_event_id=last_processed)
         for e in new_events:
-            store.append_event(e.execution_id, e.workflow_id, e.category, e.type, e.payload)
+            store.append_event(e.execution_id, e.workflow_id, e.category, e.payload)
 
         # Process new inbox events — only resolve handlers, don't re-tick.
         # Unblocked workflows will be ticked on the next step().
@@ -260,8 +265,7 @@ class Engine:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
-                    type='workflow_finished',
-                    payload={'result': e.value},
+                    payload=ev.WorkflowFinished(result=e.value),
                 ))
                 continue
             finally:
@@ -282,7 +286,7 @@ class Engine:
                     if dep_wf and dep_wf.status == 'finished':
                         hs.state = handler_cls.on_event(
                             'workflow_finished', dep_id,
-                            {'result': dep_wf.result}, hs.state,
+                            ev.WorkflowFinished(result=dep_wf.result), hs.state,
                         )
                 state.handlers[workflow_id] = hs
             elif isinstance(val, SleepOp):
@@ -302,8 +306,7 @@ class Engine:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='outbox',
-                    type='shell_request',
-                    payload={'command': val.command, 'workdir': str(workdir)},
+                    payload=ev.ShellRequest(command=val.command),
                 ))
                 result = isolation.run_shell(workdir, val.command)
                 from workflows.isolation.base import scan_git_branches
@@ -312,9 +315,9 @@ class Engine:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
-                    type='shell_result',
-                    payload={'command': val.command, 'exit_code': result.exit_code,
-                             'stdout': result.stdout, 'stderr': result.stderr},
+                    payload=ev.ShellResult(
+                        command=val.command, exit_code=result.exit_code,
+                        stdout=result.stdout, stderr=result.stderr),
                 ))
             elif isinstance(val, ReadFileOp):
                 if not wf.workdir:
@@ -325,14 +328,12 @@ class Engine:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='outbox',
-                    type='file_read_request',
-                    payload={'path': val.path, 'workdir': wf.workdir},
+                    payload=ev.FileReadRequest(path=val.path),
                 ))
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
-                    type='file_read_result',
-                    payload={'path': val.path, 'content': content},
+                    payload=ev.FileReadResult(path=val.path, content=content),
                 ))
             elif isinstance(val, WriteFileOp):
                 if not wf.workdir:
@@ -344,22 +345,18 @@ class Engine:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='outbox',
-                    type='file_write_request',
-                    payload={'path': val.path, 'content': val.content,
-                             'workdir': wf.workdir},
+                    payload=ev.FileWriteRequest(path=val.path, content=val.content),
                 ))
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
-                    type='file_write_result',
-                    payload={'path': val.path, 'size': len(val.content)},
+                    payload=ev.FileWriteResult(path=val.path, size=len(val.content)),
                 ))
             else:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='outbox',
-                    type='workflow_yielded',
-                    payload={'value': val},
+                    payload=ev.WorkflowYielded(value=val),
                 ))
 
         return new_events

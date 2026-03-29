@@ -2,10 +2,10 @@
 
 import pytest
 from workflows import (
-    workflow, wait, conv_append, conv_read, conv_search,
-    conv_get, conv_replace_with, llm, Latest, Engine, EngineConfig, Store,
+    workflow, wait, conv_append, conv_list, conv_read, conv_replace_with,
+    Latest, Engine, EngineConfig, Store,
 )
-from workflows.conversation import MessageRef, ConversationMessage
+from workflows.conversation import MessageRef, Message
 
 
 # ---- Store-level tests ----
@@ -21,134 +21,146 @@ class TestConversationStore:
         ref = store.conv_append_message('c1', 'user', 'hello')
         assert ref.conversation_id == 'c1'
         assert ref.layer == 0
-        assert ref.message_id  # not empty
+        assert ref.role == 'user'
 
-    def test_read_messages(self, store):
+    def test_list_and_read(self, store):
         store.create_conversation('c1')
         store.conv_append_message('c1', 'user', 'hello')
         store.conv_append_message('c1', 'assistant', 'hi there')
-        msgs = store.conv_read_messages('c1')
-        assert len(msgs) == 2
-        assert msgs[0].role == 'user'
-        assert msgs[0].content == 'hello'
-        assert msgs[1].role == 'assistant'
-        assert msgs[1].content == 'hi there'
+        refs = store.conv_list_messages('c1')
+        assert len(refs) == 2
+        assert refs[0].role == 'user'
+        assert refs[1].role == 'assistant'
+        messages = store.conv_read_messages(refs)
+        assert len(messages) == 2
+        assert messages[0].content == 'hello'
+        assert messages[1].content == 'hi there'
 
-    def test_read_preserves_order(self, store):
+    def test_list_preserves_order(self, store):
         store.create_conversation('c1')
         for i in range(10):
             store.conv_append_message('c1', 'user', f'msg {i}')
-        msgs = store.conv_read_messages('c1')
-        assert [m.content for m in msgs] == [f'msg {i}' for i in range(10)]
+        refs = store.conv_list_messages('c1')
+        messages = store.conv_read_messages(refs)
+        assert [m.content for m in messages] == [f'msg {i}' for i in range(10)]
 
     def test_parent_chain(self, store):
         store.create_conversation('parent')
         store.conv_append_message('parent', 'user', 'from parent')
         ref = store.conv_resolve_ref('parent')
-
         store.create_conversation('child',
             parent_conversation_id='parent',
             parent_message_id=ref.message_id,
             parent_layer=ref.layer)
         store.conv_append_message('child', 'assistant', 'from child')
-
-        msgs = store.conv_read_messages('child')
-        assert len(msgs) == 2
-        assert msgs[0].content == 'from parent'
-        assert msgs[1].content == 'from child'
+        refs = store.conv_list_messages('child')
+        messages = store.conv_read_messages(refs)
+        assert len(messages) == 2
+        assert messages[0].content == 'from parent'
+        assert messages[1].content == 'from child'
 
     def test_parent_chain_three_levels(self, store):
         store.create_conversation('a')
         store.conv_append_message('a', 'user', 'level-a')
         ref_a = store.conv_resolve_ref('a')
-
         store.create_conversation('b',
             parent_conversation_id='a',
-            parent_message_id=ref_a.message_id,
-            parent_layer=ref_a.layer)
+            parent_message_id=ref_a.message_id, parent_layer=ref_a.layer)
         store.conv_append_message('b', 'assistant', 'level-b')
         ref_b = store.conv_resolve_ref('b')
-
         store.create_conversation('c',
             parent_conversation_id='b',
-            parent_message_id=ref_b.message_id,
-            parent_layer=ref_b.layer)
+            parent_message_id=ref_b.message_id, parent_layer=ref_b.layer)
         store.conv_append_message('c', 'user', 'level-c')
-
-        msgs = store.conv_read_messages('c')
-        assert [m.content for m in msgs] == ['level-a', 'level-b', 'level-c']
+        refs = store.conv_list_messages('c')
+        messages = store.conv_read_messages(refs)
+        assert [m.content for m in messages] == ['level-a', 'level-b', 'level-c']
 
     def test_layer_compaction(self, store):
         store.create_conversation('c1')
         r1 = store.conv_append_message('c1', 'user', 'old msg 1')
         r2 = store.conv_append_message('c1', 'user', 'old msg 2')
-        r3 = store.conv_append_message('c1', 'user', 'keep this')
-
-        new_refs = store.conv_replace_with('c1',
+        store.conv_append_message('c1', 'user', 'keep this')
+        store.conv_replace_with('c1',
             [{'role': 'system', 'content': 'summary of 1+2'}],
-            start_message_id=r1.message_id,
-            end_message_id=r2.message_id)
-
-        msgs = store.conv_read_messages('c1')
-        assert len(msgs) == 2
-        assert msgs[0].content == 'summary of 1+2'
-        assert msgs[1].content == 'keep this'
+            start_message_id=r1.message_id, end_message_id=r2.message_id)
+        refs = store.conv_list_messages('c1')
+        messages = store.conv_read_messages(refs)
+        assert len(messages) == 2
+        assert messages[0].content == 'summary of 1+2'
+        assert messages[1].content == 'keep this'
 
     def test_replace_entire_conversation(self, store):
         store.create_conversation('c1')
         store.conv_append_message('c1', 'user', 'a')
         store.conv_append_message('c1', 'user', 'b')
-        store.conv_append_message('c1', 'user', 'c')
-
-        store.conv_replace_with('c1',
-            [{'role': 'system', 'content': 'replaced all'}])
-
-        msgs = store.conv_read_messages('c1')
-        assert len(msgs) == 1
-        assert msgs[0].content == 'replaced all'
+        store.conv_replace_with('c1', [{'role': 'system', 'content': 'replaced all'}])
+        refs = store.conv_list_messages('c1')
+        messages = store.conv_read_messages(refs)
+        assert len(messages) == 1
+        assert messages[0].content == 'replaced all'
 
     def test_replace_from_start(self, store):
         store.create_conversation('c1')
         store.conv_append_message('c1', 'user', 'a')
         r2 = store.conv_append_message('c1', 'user', 'b')
         store.conv_append_message('c1', 'user', 'c')
-
         store.conv_replace_with('c1',
             [{'role': 'system', 'content': 'replaced a+b'}],
             end_message_id=r2.message_id)
+        refs = store.conv_list_messages('c1')
+        messages = store.conv_read_messages(refs)
+        assert len(messages) == 2
+        assert messages[0].content == 'replaced a+b'
+        assert messages[1].content == 'c'
 
-        msgs = store.conv_read_messages('c1')
-        assert len(msgs) == 2
-        assert msgs[0].content == 'replaced a+b'
-        assert msgs[1].content == 'c'
-
-    def test_search(self, store):
-        store.create_conversation('c1')
-        store.conv_append_message('c1', 'user', 'hello world')
-        store.conv_append_message('c1', 'assistant', 'goodbye world')
-        store.conv_append_message('c1', 'user', 'hello again')
-
-        results = store.conv_search_messages('c1', '%hello%')
-        assert len(results) == 2
-
-    def test_get_by_refs(self, store):
+    def test_read_by_specific_refs(self, store):
         store.create_conversation('c1')
         r1 = store.conv_append_message('c1', 'user', 'first')
         r2 = store.conv_append_message('c1', 'user', 'second')
         store.conv_append_message('c1', 'user', 'third')
+        messages = store.conv_read_messages([r1, r2])
+        assert len(messages) == 2
+        assert messages[0].content == 'first'
+        assert messages[1].content == 'second'
 
-        results = store.conv_get_messages([r1, r2])
-        assert len(results) == 2
-        assert results[0].content == 'first'
-        assert results[1].content == 'second'
+    def test_message_ref_has_role(self, store):
+        store.create_conversation('c1')
+        ref = store.conv_append_message('c1', 'assistant', 'hello')
+        assert ref.role == 'assistant'
+        refs = store.conv_list_messages('c1')
+        assert refs[0].role == 'assistant'
+
+    def test_message_has_role_via_ref(self, store):
+        store.create_conversation('c1')
+        store.conv_append_message('c1', 'user', 'hello')
+        refs = store.conv_list_messages('c1')
+        messages = store.conv_read_messages(refs)
+        assert messages[0].role == 'user'
+
+    def test_list_with_role_filter(self, store):
+        store.create_conversation('c1')
+        store.conv_append_message('c1', 'user', 'q1')
+        store.conv_append_message('c1', 'assistant', 'a1')
+        store.conv_append_message('c1', 'user', 'q2')
+        refs = store.conv_list_messages('c1', role_filter='user')
+        assert len(refs) == 2
+        assert all(r.role == 'user' for r in refs)
+
+    def test_list_with_pattern(self, store):
+        store.create_conversation('c1')
+        store.conv_append_message('c1', 'user', 'hello world')
+        store.conv_append_message('c1', 'assistant', 'goodbye world')
+        store.conv_append_message('c1', 'user', 'hello again')
+        refs = store.conv_list_messages('c1', pattern='%hello%')
+        assert len(refs) == 2
 
     def test_resolve_ref(self, store):
         store.create_conversation('c1')
         store.conv_append_message('c1', 'user', 'a')
-        store.conv_append_message('c1', 'user', 'b')
         ref = store.conv_resolve_ref('c1')
         assert ref.conversation_id == 'c1'
-        assert ref.message_id  # not empty
+        assert ref.message_id
         assert ref.layer == 0
 
 
@@ -158,7 +170,8 @@ class TestConversationStore:
 def chat_workflow():
     yield conv_append(role='user', content='Hello')
     yield conv_append(role='assistant', content='Hi there')
-    messages = yield conv_read()
+    refs = yield conv_list()
+    messages = yield conv_read(refs)
     return [m.content for m in messages]
 
 
@@ -167,8 +180,8 @@ def search_workflow():
     yield conv_append(role='user', content='find this needle')
     yield conv_append(role='user', content='not this one')
     yield conv_append(role='user', content='another needle here')
-    results = yield conv_search(pattern='%needle%')
-    return len(results)
+    refs = yield conv_list(pattern='%needle%')
+    return len(refs)
 
 
 @workflow
@@ -180,7 +193,8 @@ def replace_workflow():
         [{'role': 'system', 'content': 'summary'}],
         end_ref=r2,
     )
-    messages = yield conv_read()
+    refs = yield conv_list()
+    messages = yield conv_read(refs)
     return [m.content for m in messages]
 
 
@@ -194,7 +208,8 @@ def parent_with_conv():
 
 @workflow
 def child_reader():
-    messages = yield conv_read()
+    refs = yield conv_list()
+    messages = yield conv_read(refs)
     return [m.content for m in messages]
 
 
@@ -248,7 +263,6 @@ class TestConversationEngine:
         eid = engine.start(store, 'parent_with_conv', [])
         state = run_to_completion(engine, store, eid)
         assert state.finished
-        # Child should see parent's message via forked conversation
         assert state.workflows[state.root_workflow_id].result == ['parent message']
 
     def test_conversation_events_in_log(self):
@@ -258,4 +272,4 @@ class TestConversationEngine:
         run_to_completion(engine, store, eid)
         outbox = store.read_outbox(eid)
         conv_events = [e for e in outbox if 'conv' in e.type]
-        assert len(conv_events) >= 2  # at least 2 appends + 1 read
+        assert len(conv_events) >= 2

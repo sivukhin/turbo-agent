@@ -13,6 +13,11 @@ dependencies = [
     "rich>=14.3.3",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "llm: tests that require LLM API keys (skip with -m 'not llm')",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",

@@ -4,7 +4,7 @@ import turso
 from workflows.ops import ExecutionState, Event
 from workflows.events import serialize_payload, deserialize_payload, payload_type_name
 from workflows.conversation import (
-    MessageRef, ConversationRef, ConversationMessage, _sortable_uuid,
+    MessageRef, ConversationRef, Message, _sortable_uuid,
 )
 
 
@@ -186,13 +186,16 @@ class Store:
             (conversation_id, message_id, role, content),
         )
         self.conn.commit()
-        return MessageRef(conversation_id=conversation_id, message_id=message_id, layer=0)
+        return MessageRef(conversation_id=conversation_id, message_id=message_id,
+                          layer=0, role=role)
 
-    def conv_read_messages(self, conversation_id: str,
+    def conv_list_messages(self, conversation_id: str,
                            end_message_id: str | None = None,
-                           max_layer: int | None = None) -> list[ConversationMessage]:
-        """Read resolved conversation, following parent chain."""
-        # Get parent ref
+                           max_layer: int | None = None,
+                           start_message_id: str | None = None,
+                           role_filter: str | None = None,
+                           pattern: str | None = None) -> list[MessageRef]:
+        """List message refs, following parent chain. Returns [MessageRef] (no content)."""
         cur = self.conn.cursor()
         cur.execute(
             "SELECT parent_conversation_id, parent_message_id, parent_layer "
@@ -200,93 +203,84 @@ class Store:
             (conversation_id,),
         )
         row = cur.fetchone()
-        parent_messages = []
+        parent_refs = []
         if row and row[0]:
-            parent_messages = self.conv_read_messages(row[0], row[1], row[2])
+            parent_refs = self.conv_list_messages(
+                row[0], row[1], row[2],
+                start_message_id=start_message_id,
+                role_filter=role_filter, pattern=pattern,
+            )
 
-        # Read own messages
-        own_messages = self._read_conversation_layer(
+        own_refs = self._list_layer_messages(
             conversation_id, end_message_id, max_layer,
+            start_message_id=start_message_id,
+            role_filter=role_filter, pattern=pattern,
+        )
+        return parent_refs + own_refs
+
+    def _list_layer_messages(self, conversation_id, end_message_id, max_layer,
+                             start_message_id=None, role_filter=None,
+                             pattern=None) -> list[MessageRef]:
+        """List refs from a single conversation layer (no parent chain)."""
+        cur = self.conn.cursor()
+        conditions = ["conversation_id = ?"]
+        params = [conversation_id]
+        if end_message_id:
+            conditions.append("message_id <= ?")
+            params.append(end_message_id)
+        if start_message_id:
+            conditions.append("message_id >= ?")
+            params.append(start_message_id)
+        if max_layer is not None:
+            conditions.append("layer <= ?")
+            params.append(max_layer)
+
+        where = " AND ".join(conditions)
+        cur.execute(
+            f"SELECT message_id, layer, tombstone, role "
+            f"FROM conversations WHERE {where} ORDER BY message_id, layer DESC",
+            params,
         )
 
-        return parent_messages + own_messages
-
-    def _read_conversation_layer(self, conversation_id: str,
-                                 end_message_id: str | None,
-                                 max_layer: int | None) -> list[ConversationMessage]:
-        """Read messages from a single conversation (no parent chain)."""
-        cur = self.conn.cursor()
-
-        if end_message_id and max_layer is not None:
-            cur.execute(
-                """SELECT message_id, layer, tombstone, role, content
-                   FROM conversations
-                   WHERE conversation_id = ? AND message_id <= ? AND layer <= ?
-                   ORDER BY message_id, layer DESC""",
-                (conversation_id, end_message_id, max_layer),
-            )
-        elif end_message_id:
-            cur.execute(
-                """SELECT message_id, layer, tombstone, role, content
-                   FROM conversations
-                   WHERE conversation_id = ? AND message_id <= ?
-                   ORDER BY message_id, layer DESC""",
-                (conversation_id, end_message_id),
-            )
-        elif max_layer is not None:
-            cur.execute(
-                """SELECT message_id, layer, tombstone, role, content
-                   FROM conversations
-                   WHERE conversation_id = ? AND layer <= ?
-                   ORDER BY message_id, layer DESC""",
-                (conversation_id, max_layer),
-            )
-        else:
-            cur.execute(
-                """SELECT message_id, layer, tombstone, role, content
-                   FROM conversations
-                   WHERE conversation_id = ?
-                   ORDER BY message_id, layer DESC""",
-                (conversation_id,),
-            )
-
-        # For each message_id, take the highest layer entry
-        messages = []
+        refs = []
         seen = set()
-        for msg_id, layer, tombstone, role, content in cur.fetchall():
+        for msg_id, layer, tombstone, role in cur.fetchall():
             if msg_id in seen:
                 continue
             seen.add(msg_id)
-            if not tombstone:
-                messages.append(ConversationMessage(
-                    ref=MessageRef(conversation_id, msg_id, layer),
-                    role=role,
-                    content=content,
-                ))
+            if tombstone:
+                continue
+            if role_filter and role != role_filter:
+                continue
+            if pattern:
+                # Need to check content for pattern — read it
+                cur2 = self.conn.cursor()
+                cur2.execute(
+                    "SELECT content FROM conversations "
+                    "WHERE conversation_id = ? AND message_id = ? AND layer = ?",
+                    (conversation_id, msg_id, layer),
+                )
+                row = cur2.fetchone()
+                if row and pattern.replace('%', '') not in row[0]:
+                    continue
+            refs.append(MessageRef(conversation_id, msg_id, layer, role))
 
-        # Sort by message_id (they're sortable UUIDs)
-        messages.sort(key=lambda m: m.ref.message_id)
-        return messages
+        refs.sort(key=lambda r: r.message_id)
+        return refs
 
-    def conv_search_messages(self, conversation_id: str,
-                             pattern: str) -> list[ConversationMessage]:
-        """Search conversation messages by LIKE pattern on content."""
-        all_messages = self.conv_read_messages(conversation_id)
-        return [m for m in all_messages if pattern.replace('%', '') in m.content]
-
-    def conv_get_messages(self, refs: list[MessageRef]) -> list[ConversationMessage]:
-        """Batch read messages by refs."""
+    def conv_read_messages(self, refs: list[MessageRef]) -> list[Message]:
+        """Read message content by refs. Returns [Message]."""
         results = []
         cur = self.conn.cursor()
         for ref in refs:
             cur.execute(
-                """SELECT role, content FROM conversations
-                   WHERE conversation_id = ? AND message_id = ? AND layer = ?""",
+                "SELECT content FROM conversations "
+                "WHERE conversation_id = ? AND message_id = ? AND layer = ?",
                 (ref.conversation_id, ref.message_id, ref.layer),
             )
             row = cur.fetchone()
             if row:
-                results.append(ConversationMessage(ref=ref, role=row[0], content=row[1]))
+                results.append(Message(ref=ref, content=row[0]))
         return results
 
     def conv_replace_with(self, conversation_id: str,
@@ -296,7 +290,6 @@ class Store:
         """Replace a range of messages with new ones via layer compaction."""
         cur = self.conn.cursor()
 
-        # Find messages in range and max layer
         conditions = ["conversation_id = ?"]
         params = [conversation_id]
         if start_message_id:
@@ -316,7 +309,6 @@ class Store:
         max_layer = max((row[1] for row in existing), default=0) if existing else 0
         new_layer = max_layer + 1
 
-        # Tombstone existing messages at new layer
         for msg_id, _ in existing:
             cur.execute(
                 """INSERT OR IGNORE INTO conversations
@@ -325,11 +317,7 @@ class Store:
                 (conversation_id, msg_id, new_layer),
             )
 
-        # Insert new messages at new layer.
-        # Use the first replaced message_id's timestamp prefix so new messages
-        # sort in the same position as the replaced range.
         base_id = existing[0][0] if existing else (start_message_id or _sortable_uuid())
-        # Parse: "{timestamp}-{seq}-{rand}" and increment seq
         parts = base_id.split('-', 2)
         base_ts = parts[0]
         base_seq = int(parts[1], 16) if len(parts) > 1 else 0
@@ -344,13 +332,13 @@ class Store:
                    VALUES (?, ?, ?, 0, ?, ?)""",
                 (conversation_id, msg_id, new_layer, msg['role'], msg['content']),
             )
-            new_refs.append(MessageRef(conversation_id, msg_id, new_layer))
+            new_refs.append(MessageRef(conversation_id, msg_id, new_layer, msg['role']))
 
         self.conn.commit()
         return new_refs
 
     def conv_resolve_ref(self, conversation_id: str) -> ConversationRef:
-        """Resolve Latest to a concrete ConversationRef."""
+        """Resolve to a concrete ConversationRef."""
         cur = self.conn.cursor()
         cur.execute(
             "SELECT MAX(message_id), MAX(layer) FROM conversations WHERE conversation_id = ?",

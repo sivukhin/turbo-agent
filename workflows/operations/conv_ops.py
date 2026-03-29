@@ -1,8 +1,6 @@
 from workflows.operations.base import OpContext, register_handler
 from workflows.ops import Event
-from workflows.conversation import (
-    ConvAppendOp, ConvReadOp, ConvSearchOp, ConvGetOp, ConvReplaceWithOp,
-)
+from workflows.conversation import ConvAppendOp, ConvListOp, ConvReadOp, ConvReplaceWithOp
 import workflows.events as ev
 
 
@@ -22,54 +20,45 @@ class ConvAppendOpHandler:
         ))
 
 
-@register_handler(ConvReadOp)
-class ConvReadOpHandler:
+@register_handler(ConvListOp)
+class ConvListOpHandler:
     @staticmethod
-    def handle(val: ConvReadOp, ctx: OpContext) -> None:
+    def handle(val: ConvListOp, ctx: OpContext) -> None:
         if not ctx.store or not ctx.wf.conversation_id:
             return
-        resolved = ctx.store.conv_resolve_ref(ctx.wf.conversation_id)
+        conv_id = ctx.wf.conversation_id
+        if val.conversation and hasattr(val.conversation, 'conversation_id'):
+            conv_id = val.conversation.conversation_id
+        resolved = ctx.store.conv_resolve_ref(conv_id)
         ctx.wf.status = 'waiting'
         ctx.new_events.append(Event(
             event_id=0, execution_id=ctx.execution_id,
             workflow_id=ctx.workflow_id, category='outbox',
-            payload=ev.ConvReadRequest(
+            payload=ev.ConvListRequest(
                 conversation_id=resolved.conversation_id,
                 end_message_id=resolved.message_id,
-                layer=resolved.layer),
-        ))
-
-
-@register_handler(ConvSearchOp)
-class ConvSearchOpHandler:
-    @staticmethod
-    def handle(val: ConvSearchOp, ctx: OpContext) -> None:
-        if not ctx.store or not ctx.wf.conversation_id:
-            return
-        ctx.wf.status = 'waiting'
-        ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
-            payload=ev.ConvSearchRequest(
-                conversation_id=ctx.wf.conversation_id,
+                layer=resolved.layer,
+                start_message_id=val.start_message_id,
+                role_filter=val.role_filter,
                 pattern=val.pattern),
         ))
 
 
-@register_handler(ConvGetOp)
-class ConvGetOpHandler:
+@register_handler(ConvReadOp)
+class ConvReadOpHandler:
     @staticmethod
-    def handle(val: ConvGetOp, ctx: OpContext) -> None:
+    def handle(val: ConvReadOp, ctx: OpContext) -> None:
         if not ctx.store:
             return
         ctx.wf.status = 'waiting'
         ctx.new_events.append(Event(
             event_id=0, execution_id=ctx.execution_id,
             workflow_id=ctx.workflow_id, category='outbox',
-            payload=ev.ConvGetRequest(
+            payload=ev.ConvReadRequest(
                 message_refs=[{'conversation_id': r.conversation_id,
                                'message_id': r.message_id,
-                               'layer': r.layer} for r in val.refs]),
+                               'layer': r.layer, 'role': r.role}
+                              for r in val.refs]),
         ))
 
 

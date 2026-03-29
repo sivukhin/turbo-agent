@@ -104,40 +104,34 @@ class ConvAppendResult:
     conversation_id: str
     message_id: str
     layer: int
+    role: str
+
+@dataclass
+class ConvListRequest:
+    conversation_id: str
+    end_message_id: str | None = None
+    layer: int | None = None
+    start_message_id: str | None = None
+    role_filter: str | None = None
+    pattern: str | None = None
+
+@dataclass
+class ConvListResult:
+    count: int
+    message_refs: list  # [{"conversation_id", "message_id", "layer", "role"}]
 
 @dataclass
 class ConvReadRequest:
-    conversation_id: str
-    end_message_id: str | None
-    layer: int | None
+    message_refs: list  # [{"conversation_id", "message_id", "layer", "role"}]
 
 @dataclass
 class ConvReadResult:
-    count: int
-    message_refs: list        # [{"conversation_id", "message_id", "layer"}]
-
-@dataclass
-class ConvSearchRequest:
-    conversation_id: str
-    pattern: str
-
-@dataclass
-class ConvSearchResult:
-    count: int
-    message_refs: list
-
-@dataclass
-class ConvGetRequest:
-    message_refs: list
-
-@dataclass
-class ConvGetResult:
     count: int
 
 @dataclass
 class ConvReplaceWithRequest:
     conversation_id: str
-    new_messages: list        # [{"role", "content"}]
+    new_messages: list
     start_message_id: str | None
     end_message_id: str | None
 
@@ -145,7 +139,7 @@ class ConvReplaceWithRequest:
 class ConvReplaceWithResult:
     conversation_id: str
     new_layer: int
-    new_message_refs: list    # [{"conversation_id", "message_id", "layer"}]
+    new_message_refs: list
 
 
 # ---- registry ----
@@ -166,9 +160,8 @@ _ALL_PAYLOADS = [
     WorkflowSpawned,
     LlmRequest, LlmResponse,
     ConvAppendRequest, ConvAppendResult,
+    ConvListRequest, ConvListResult,
     ConvReadRequest, ConvReadResult,
-    ConvSearchRequest, ConvSearchResult,
-    ConvGetRequest, ConvGetResult,
     ConvReplaceWithRequest, ConvReplaceWithResult,
 ]
 

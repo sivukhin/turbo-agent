@@ -29,7 +29,7 @@ class WriteFileOp:
     content: str
 
 @dataclass
-class LlmOp:
+class AiOp:
     messages: list | None = None
     conversation: object = None
     model: str = 'anthropic/claude-sonnet-4-20250514'
@@ -62,10 +62,10 @@ def read_file(path):
 def write_file(path, content):
     return WriteFileOp(path=path, content=content)
 
-def llm(messages=None, *, conversation=None,
+def ai(messages=None, *, conversation=None,
         model='anthropic/claude-sonnet-4-20250514', max_tokens=None,
         temperature=0.0, system=None, tools=None):
-    return LlmOp(
+    return AiOp(
         messages=messages, conversation=conversation,
         model=model, max_tokens=max_tokens, temperature=temperature,
         system=system, tools=tools,

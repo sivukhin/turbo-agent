@@ -5,10 +5,10 @@ from workflows.operations.wait_op import WaitOpHandler
 from workflows.operations.sleep_op import SleepOpHandler
 from workflows.operations.shell_op import ShellOpHandler
 from workflows.operations.file_ops import ReadFileOpHandler, WriteFileOpHandler
-from workflows.operations.llm_op import LlmOpHandler
+from workflows.operations.llm_op import AiOpHandler
 from workflows.operations.conv_ops import (
-    ConvAppendOpHandler, ConvReadOpHandler, ConvSearchOpHandler,
-    ConvGetOpHandler, ConvReplaceWithOpHandler,
+    ConvAppendOpHandler, ConvListOpHandler, ConvReadOpHandler,
+    ConvReplaceWithOpHandler,
 )
 
 __all__ = [

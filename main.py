@@ -385,7 +385,8 @@ def _find_conv_owner(state, store, execution_id, conversation_id):
 
 
 def _print_conversation(store, conversation_id, wf_name, wf_id):
-    messages = store.conv_read_messages(conversation_id)
+    refs = store.conv_list_messages(conversation_id)
+    messages = store.conv_read_messages(refs)
     ref = store.conv_resolve_ref(conversation_id)
 
     # Check for parent

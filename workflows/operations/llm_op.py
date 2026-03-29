@@ -7,8 +7,6 @@ import workflows.events as ev
 class LlmOpHandler:
     @staticmethod
     def handle(val: LlmOp, ctx: OpContext) -> None:
-        if val.provider is None:
-            raise RuntimeError('LlmOp requires a provider instance')
         messages = val.messages
         if val.conversation is not None and ctx.store and ctx.wf.conversation_id:
             conv_msgs = ctx.store.conv_read_messages(ctx.wf.conversation_id)

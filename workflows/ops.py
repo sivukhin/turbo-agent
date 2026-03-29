@@ -32,8 +32,7 @@ class WriteFileOp:
 class LlmOp:
     messages: list | None = None
     conversation: object = None
-    provider: object = None
-    model: str = 'claude-sonnet-4-20250514'
+    model: str = 'anthropic/claude-sonnet-4-20250514'
     max_tokens: int | None = None
     temperature: float = 0.0
     system: str | None = None
@@ -63,11 +62,11 @@ def read_file(path):
 def write_file(path, content):
     return WriteFileOp(path=path, content=content)
 
-def llm(messages=None, *, conversation=None, provider=None,
-        model='claude-sonnet-4-20250514', max_tokens=None,
+def llm(messages=None, *, conversation=None,
+        model='anthropic/claude-sonnet-4-20250514', max_tokens=None,
         temperature=0.0, system=None, tools=None):
     return LlmOp(
-        messages=messages, conversation=conversation, provider=provider,
+        messages=messages, conversation=conversation,
         model=model, max_tokens=max_tokens, temperature=temperature,
         system=system, tools=tools,
     )

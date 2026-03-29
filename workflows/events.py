@@ -73,7 +73,7 @@ class WorkflowSpawned:
 class LlmRequest:
     """Request to an LLM. Provider-agnostic."""
     messages: list          # [{"role": "user"|"assistant"|"system", "content": str|list}]
-    model: str = 'claude-sonnet-4-20250514'
+    model: str = 'anthropic/claude-sonnet-4-20250514'
     max_tokens: int | None = None
     temperature: float = 0.0
     system: str | None = None

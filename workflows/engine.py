@@ -19,7 +19,8 @@ def _uuid():
 
 
 from dataclasses import dataclass as _dataclass, field as _field
-from workflows.operations.event_handlers import DEFAULT_EVENT_HANDLERS
+from workflows.event_handlers import DEFAULT_EVENT_HANDLERS
+from workflows.event_handlers.base import get_event_type_name
 
 @_dataclass
 class EngineConfig:
@@ -121,7 +122,7 @@ class Engine:
         for event in events:
             # Global event handlers see all events and can modify state
             for handler in self.config.event_handlers:
-                if handler.event_type() == event.type:
+                if get_event_type_name(handler) == event.type:
                     emitted = handler.handle(event, store, state)
                     if emitted:
                         new_events.extend(emitted)

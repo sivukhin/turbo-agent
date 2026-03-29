@@ -224,6 +224,27 @@ def _format_payload(payload):
     if isinstance(payload, ev.WorkflowSpawned):
         parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else '-'
         return f'{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}'
+    if isinstance(payload, ev.ConvAppendRequest):
+        content = payload.content[:60] + ('...' if len(payload.content) > 60 else '')
+        return f'{payload.role}: {content!r}'
+    if isinstance(payload, ev.ConvAppendResult):
+        return f'msg={payload.message_id[:12]} layer={payload.layer}'
+    if isinstance(payload, ev.ConvReadRequest):
+        return f'conv={payload.conversation_id[:8]}'
+    if isinstance(payload, ev.ConvReadResult):
+        return f'{payload.count} messages'
+    if isinstance(payload, ev.ConvSearchRequest):
+        return f'pattern={payload.pattern!r}'
+    if isinstance(payload, ev.ConvSearchResult):
+        return f'{payload.count} matches'
+    if isinstance(payload, ev.ConvGetRequest):
+        return f'{len(payload.message_refs)} refs'
+    if isinstance(payload, ev.ConvGetResult):
+        return f'{payload.count} messages'
+    if isinstance(payload, ev.ConvReplaceWithRequest):
+        return f'{len(payload.new_messages)} new msgs'
+    if isinstance(payload, ev.ConvReplaceWithResult):
+        return f'layer={payload.new_layer} {len(payload.new_message_refs)} msgs'
     if isinstance(payload, ev.LlmRequest):
         n_msgs = len(payload.messages)
         tools = f', {len(payload.tools)} tools' if payload.tools else ''
@@ -318,46 +339,49 @@ def cmd_conv(args):
     store = Store(DB_PATH)
     state, _ = store.load_state(args.id)
 
-    # Collect all conversation_ids from workflows (active + from events for pruned ones)
-    conv_ids = {}
-    for wf_id, wf in state.workflows.items():
-        if wf.conversation_id:
-            conv_ids[wf.conversation_id] = (wf_id, wf.name)
-
-    # Also scan outbox for spawned workflows that may have been pruned
-    outbox = store.read_outbox(args.id)
-    from workflows.events import WorkflowSpawned
-    for event in outbox:
-        if isinstance(event.payload, WorkflowSpawned):
-            child_id = event.payload.child_workflow_id
-            # Try to find conversation for this workflow in refs table
-            cur = store.conn.cursor()
-            cur.execute(
-                "SELECT conversation_id FROM conversation_refs "
-                "WHERE conversation_id LIKE ? ORDER BY conversation_id",
-                (f'%',),
-            )
-
-    if args.workflow_id:
-        # Show conversation for a specific workflow
-        wf = state.workflows.get(args.workflow_id)
-        if not wf:
-            console.print(f'[red]Workflow {args.workflow_id} not found in active state[/]')
+    if args.conversation_id:
+        # Show specific conversation by ID (prefix match)
+        cur = store.conn.cursor()
+        cur.execute(
+            "SELECT conversation_id FROM conversation_refs WHERE conversation_id LIKE ?",
+            (f'{args.conversation_id}%',),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            console.print(f'[red]No conversation matching {args.conversation_id}[/]')
             store.close()
             sys.exit(1)
-        if not wf.conversation_id:
-            console.print(f'[yellow]Workflow {args.workflow_id} has no conversation[/]')
-            store.close()
-            return
-        _print_conversation(store, wf.conversation_id, wf.name, args.workflow_id)
+        for (conv_id,) in rows:
+            # Find workflow name from active state or events
+            wf_name, wf_id = _find_conv_owner(state, store, args.id, conv_id)
+            _print_conversation(store, conv_id, wf_name, wf_id)
+            console.print()
     else:
-        # Show conversations for all active workflows
-        for wf_id, wf in sorted(state.workflows.items()):
-            if wf.conversation_id:
-                _print_conversation(store, wf.conversation_id, wf.name, wf_id)
-                console.print()
+        # Show all conversations: active workflows + all from conversation_refs
+        cur = store.conn.cursor()
+        cur.execute("SELECT conversation_id FROM conversation_refs ORDER BY conversation_id")
+        all_convs = [row[0] for row in cur.fetchall()]
+        for conv_id in all_convs:
+            wf_name, wf_id = _find_conv_owner(state, store, args.id, conv_id)
+            _print_conversation(store, conv_id, wf_name, wf_id)
+            console.print()
 
     store.close()
+
+
+def _find_conv_owner(state, store, execution_id, conversation_id):
+    """Find the workflow that owns a conversation."""
+    for wf_id, wf in state.workflows.items():
+        if wf.conversation_id == conversation_id:
+            return wf.name, wf_id
+    # Search events for pruned workflows
+    outbox = store.read_outbox(execution_id)
+    from workflows.events import WorkflowSpawned, ConvAppendRequest
+    for event in outbox:
+        if isinstance(event.payload, ConvAppendRequest):
+            if event.payload.conversation_id == conversation_id:
+                return '(pruned)', event.workflow_id or '?'
+    return '(unknown)', '?'
 
 
 def _print_conversation(store, conversation_id, wf_name, wf_id):
@@ -464,12 +488,17 @@ def main():
     p_inspect = sub.add_parser('inspect', help='Inspect full execution state')
     p_inspect.add_argument('id', help='Execution ID')
 
+    p_conv = sub.add_parser('conv', help='Show conversations for an execution')
+    p_conv.add_argument('id', help='Execution ID')
+    p_conv.add_argument('conversation_id', nargs='?', help='Conversation ID prefix (default: all)')
+
     sub.add_parser('list', help='List all executions')
 
     args = parser.parse_args()
     cmds = {
         'start': cmd_start, 'step': cmd_step, 'status': cmd_status,
-        'events': cmd_events, 'inspect': cmd_inspect, 'list': cmd_list,
+        'events': cmd_events, 'inspect': cmd_inspect, 'conv': cmd_conv,
+        'list': cmd_list,
     }
     cmds[args.command](args)
 

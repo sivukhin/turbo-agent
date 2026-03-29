@@ -183,11 +183,12 @@ class Engine:
         state, last_processed = store.load_state(execution_id)
 
         # Tick all running workflows exactly once
-        new_events = self._handle_tick(state, execution_id, now)
+        new_events = self._handle_tick(state, execution_id, now, store)
 
         # Try to resolve handlers (sleep timers, etc.)
         self._try_resolve_handlers(state, now)
         self._check_finished(state)
+        self._prune_finished(state)
 
         # Write events and save state in one batch
         store.save_state(execution_id, state, last_processed_event_id=last_processed)
@@ -218,6 +219,7 @@ class Engine:
 
             self._try_resolve_handlers(state, now)
             self._check_finished(state)
+            self._prune_finished(state)
 
             last_event_id = events[-1].event_id
             store.save_state(execution_id, state, last_processed_event_id=last_event_id)
@@ -234,11 +236,20 @@ class Engine:
                 del state.handlers[handler_wf_id]
 
     def _check_finished(self, state):
-        root = state.workflows[state.root_workflow_id]
-        if root.status == 'finished':
+        root = state.workflows.get(state.root_workflow_id)
+        if root and root.status == 'finished':
             state.finished = True
 
-    def _handle_tick(self, state, execution_id, now):
+    def _prune_finished(self, state):
+        """Remove finished workflows from state. Keep root (for final result)."""
+        to_remove = [
+            wf_id for wf_id, wf in state.workflows.items()
+            if wf.status == 'finished' and wf_id != state.root_workflow_id
+        ]
+        for wf_id in to_remove:
+            del state.workflows[wf_id]
+
+    def _handle_tick(self, state, execution_id, now, store=None):
         new_events = []
 
         for workflow_id, wf in list(state.workflows.items()):
@@ -284,12 +295,23 @@ class Engine:
                     handler_type=val.mode,
                     state=handler_cls.initial_state(val.deps),
                 )
-                for dep_id in val.deps:
-                    dep_wf = state.workflows.get(dep_id)
-                    if dep_wf and dep_wf.status == 'finished':
+                # Catch up: scan all inbox events (past + current batch)
+                # for workflow_finished events matching our deps
+                if store:
+                    for past_event in store.read_inbox(execution_id):
+                        if (isinstance(past_event.payload, ev.WorkflowFinished)
+                                and past_event.workflow_id in val.deps):
+                            hs.state = handler_cls.on_event(
+                                'workflow_finished', past_event.workflow_id,
+                                past_event.payload, hs.state,
+                            )
+                for finished_event in new_events:
+                    if (finished_event.category == 'inbox'
+                            and isinstance(finished_event.payload, ev.WorkflowFinished)
+                            and finished_event.workflow_id in val.deps):
                         hs.state = handler_cls.on_event(
-                            'workflow_finished', dep_id,
-                            ev.WorkflowFinished(result=dep_wf.result), hs.state,
+                            'workflow_finished', finished_event.workflow_id,
+                            finished_event.payload, hs.state,
                         )
                 state.handlers[workflow_id] = hs
                 new_events.append(Event(

@@ -304,11 +304,14 @@ class TestWaitAll:
         root = state.workflows[state.root_workflow_id]
         assert root.status == 'finished'
         assert root.result == 6
-        # Verify both children finished
-        children = {k: v for k, v in state.workflows.items() if k != state.root_workflow_id}
-        assert all(c.status == 'finished' for c in children.values())
-        child_results = sorted(c.result for c in children.values())
-        assert child_results == [3, 3]  # counter(3)=3, adder(3)=3
+        # Finished children are pruned from state; results are in the event log
+        inbox = store.read_inbox(eid)
+        from workflows.events import WorkflowFinished
+        finished_results = sorted(
+            e.payload.result for e in inbox if isinstance(e.payload, WorkflowFinished)
+            and e.workflow_id != state.root_workflow_id
+        )
+        assert finished_results == [3, 3]
 
     def test_fan_out(self, env):
         """counter(1)=1, counter(2)=2, counter(3)=3, counter(4)=4, sum=10."""
@@ -318,9 +321,14 @@ class TestWaitAll:
         assert state.finished
         root = state.workflows[state.root_workflow_id]
         assert root.result == 10
-        children = {k: v for k, v in state.workflows.items() if k != state.root_workflow_id}
-        assert len(children) == 4
-        assert sorted(c.result for c in children.values()) == [1, 2, 3, 4]
+        # Finished children pruned; check via event log
+        inbox = store.read_inbox(eid)
+        from workflows.events import WorkflowFinished
+        child_results = sorted(
+            e.payload.result for e in inbox if isinstance(e.payload, WorkflowFinished)
+            and e.workflow_id != state.root_workflow_id
+        )
+        assert child_results == [1, 2, 3, 4]
 
     def test_ordering(self, env):
         """adder(3)=3, counter(2)=2, adder(2)=1 — results in handle order."""

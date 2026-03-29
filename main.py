@@ -63,12 +63,13 @@ def cmd_start(args):
     execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path,
                                 workdir=workdir)
 
+    inbox = store.read_inbox(execution_id)
     outbox = store.read_outbox(execution_id)
     store.close()
 
     console.print(f'[bold]Started execution[/] [cyan]{execution_id}[/]')
     console.print(f'  workflow: [bold]{wf_name}[/]({", ".join(args.args)})')
-    _print_events(outbox)
+    _print_step_events(inbox, outbox)
 
 
 def cmd_step(args):
@@ -79,8 +80,10 @@ def cmd_step(args):
         console.print(f'[yellow]Execution {args.id} already finished[/]')
         sys.exit(1)
 
+    inbox_before = store.read_inbox(args.id)
     outbox_before = store.read_outbox(args.id)
-    last_before = outbox_before[-1].event_id if outbox_before else 0
+    last_inbox = inbox_before[-1].event_id if inbox_before else 0
+    last_outbox = outbox_before[-1].event_id if outbox_before else 0
 
     engine = Engine(registry)
     try:
@@ -91,21 +94,26 @@ def cmd_step(args):
         sys.exit(1)
 
     state, _ = store.load_state(args.id)
-    new_outbox = store.read_outbox(args.id, after_event_id=last_before)
+    new_inbox = store.read_inbox(args.id, after_event_id=last_inbox)
+    new_outbox = store.read_outbox(args.id, after_event_id=last_outbox)
     store.close()
 
-    _print_events(new_outbox)
+    _print_step_events(new_inbox, new_outbox)
     if state.finished:
         root = state.workflows[state.root_workflow_id]
         console.print(f'  [bold green]returned:[/] {root.result!r}')
 
 
-def _print_events(events):
-    from workflows.events import WorkflowYielded
-    for event in events:
-        if isinstance(event.payload, WorkflowYielded):
-            wf_id = (event.workflow_id or '?')[:8]
-            console.print(f'  [dim]{wf_id}[/] [bold]→[/] {event.payload.value!r}')
+def _print_step_events(inbox, outbox):
+    all_events = sorted(inbox + outbox, key=lambda e: e.event_id)
+    for event in all_events:
+        wf_id = (event.workflow_id or '-')[:8]
+        cat_style = _category_style(event.category)
+        payload_str = _format_payload(event.payload)
+        console.print(
+            f'  [{cat_style}]{event.category:<6}[/] [dim]{wf_id}[/] '
+            f'[bold]{event.type}[/] {payload_str}'
+        )
 
 
 def cmd_status(args):
@@ -208,6 +216,14 @@ def _format_payload(payload):
         return f'write {payload.path}: {content!r}'
     if isinstance(payload, ev.FileWriteResult):
         return f'{payload.path} ({payload.size} bytes)'
+    if isinstance(payload, ev.WaitStarted):
+        deps = ', '.join(d[:8] for d in payload.deps)
+        return f'{payload.mode}({deps})'
+    if isinstance(payload, ev.SleepStarted):
+        return f'{payload.seconds}s (wake_at={payload.wake_at})'
+    if isinstance(payload, ev.WorkflowSpawned):
+        parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else '-'
+        return f'{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}'
     return repr(payload)
 
 

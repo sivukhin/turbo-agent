@@ -292,13 +292,24 @@ class Engine:
                             ev.WorkflowFinished(result=dep_wf.result), hs.state,
                         )
                 state.handlers[workflow_id] = hs
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.WaitStarted(mode=val.mode, deps=val.deps),
+                ))
             elif isinstance(val, SleepOp):
                 handler_cls = HANDLER_REGISTRY['sleep']
+                wake_at = now + val.seconds
                 wf.status = 'waiting'
                 state.handlers[workflow_id] = HandlerState(
                     handler_type='sleep',
-                    state=handler_cls.initial_state(now + val.seconds),
+                    state=handler_cls.initial_state(wake_at),
                 )
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.SleepStarted(seconds=val.seconds, wake_at=wake_at),
+                ))
             elif isinstance(val, ShellOp):
                 if not wf.workdir:
                     raise RuntimeError(f'Workflow {workflow_id} has no workdir configured')
@@ -366,12 +377,13 @@ class Engine:
 
     def _register_children(self, state, ctx, new_events, execution_id, parent_workflow_id):
         for handle in ctx.new_children:
-            self._register_child(state, handle, execution_id, parent_workflow_id)
+            self._register_child(state, handle, new_events, execution_id, parent_workflow_id)
 
-    def _register_child(self, state, handle, execution_id, parent_workflow_id):
+    def _register_child(self, state, handle, new_events, execution_id, parent_workflow_id):
         from workflows.isolation.base import StorageConfig, setup_child_workspace
         parent_wf = state.workflows.get(parent_workflow_id) if parent_workflow_id else None
 
+        config = handle.storage or StorageConfig(mode='same')
         child_wf = WorkflowState(
             name=handle.workflow_name,
             args=list(handle.args),
@@ -379,7 +391,6 @@ class Engine:
         )
 
         if parent_wf and parent_wf.workdir:
-            config = handle.storage or StorageConfig(mode='same')
             parent_dir = Path(parent_wf.workdir)
             child_dir = parent_dir.parent / handle.id
 
@@ -391,3 +402,15 @@ class Engine:
             child_wf.branches = child_branches
 
         state.workflows[handle.id] = child_wf
+
+        new_events.append(Event(
+            event_id=0, execution_id=execution_id,
+            workflow_id=handle.id, category='outbox',
+            payload=ev.WorkflowSpawned(
+                child_workflow_id=handle.id,
+                name=handle.workflow_name,
+                args=list(handle.args),
+                parent_workflow_id=parent_workflow_id,
+                storage_mode=config.mode,
+            ),
+        ))

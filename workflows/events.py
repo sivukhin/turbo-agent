@@ -49,6 +49,24 @@ class FileWriteResult:
     path: str
     size: int
 
+@dataclass
+class WaitStarted:
+    mode: str           # 'wait' | 'wait_all' | 'wait_any'
+    deps: list[str]
+
+@dataclass
+class SleepStarted:
+    seconds: float
+    wake_at: float
+
+@dataclass
+class WorkflowSpawned:
+    child_workflow_id: str
+    name: str
+    args: list
+    parent_workflow_id: str | None
+    storage_mode: str   # 'same' | 'copy-full' | 'copy-git' | 'branch'
+
 
 # ---- registry ----
 
@@ -64,6 +82,8 @@ _ALL_PAYLOADS = [
     ShellRequest, ShellResult,
     FileReadRequest, FileReadResult,
     FileWriteRequest, FileWriteResult,
+    WaitStarted, SleepStarted,
+    WorkflowSpawned,
 ]
 
 PAYLOAD_REGISTRY: dict[str, type] = {

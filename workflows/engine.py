@@ -7,6 +7,10 @@ from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
 from workflows.events import payload_type_name
 from workflows.isolation.base import StorageConfig, setup_child_workspace, scan_git_branches
+from workflows.conversation import (
+    ConvAppendOp, ConvReadOp, ConvSearchOp, ConvGetOp, ConvReplaceWithOp,
+    Latest, _sortable_uuid,
+)
 import workflows.events as ev
 
 
@@ -92,8 +96,9 @@ def write_file(path, content):
 @dataclass
 class LlmOp:
     """Yield this to make an LLM call."""
-    messages: list
-    provider: object = None  # LlmProvider instance
+    messages: list | None = None
+    conversation: object = None  # ConversationRef or Latest
+    provider: object = None      # LlmProvider instance
     model: str = 'claude-sonnet-4-20250514'
     max_tokens: int | None = None
     temperature: float = 0.0
@@ -101,22 +106,21 @@ class LlmOp:
     tools: list | None = None
 
 
-def llm(messages, *, provider=None, model='claude-sonnet-4-20250514',
-        max_tokens=None, temperature=0.0, system=None, tools=None):
+def llm(messages=None, *, conversation=None, provider=None,
+        model='claude-sonnet-4-20250514', max_tokens=None,
+        temperature=0.0, system=None, tools=None):
     """Make an LLM call. Returns LlmResult with .text, .tool_calls, .usage.
 
-        response = yield llm(
-            messages=[{"role": "user", "content": "Hello"}],
-            provider=my_provider,
-        )
-        print(response.text)
-        for tc in response.tool_calls:
-            print(tc.name, tc.input)
+        # With explicit messages:
+        response = yield llm(messages=[{"role": "user", "content": "Hello"}], provider=claude)
+
+        # With conversation (reads from workflow's conversation):
+        response = yield llm(conversation=Latest, provider=claude)
     """
     return LlmOp(
-        messages=messages, provider=provider, model=model,
-        max_tokens=max_tokens, temperature=temperature, system=system,
-        tools=tools,
+        messages=messages, conversation=conversation, provider=provider,
+        model=model, max_tokens=max_tokens, temperature=temperature,
+        system=system, tools=tools,
     )
 
 
@@ -129,6 +133,7 @@ class WorkflowState:
     parent_workflow_id: str | None = None
     workdir: str | None = None           # absolute path to workspace directory
     branches: dict | None = None         # {relative_git_repo_path: branch_name}
+    conversation_id: str | None = None   # conversation attached to this workflow
     checkpoint: dict | None = None
     status: str = 'running'
     result: object = None
@@ -190,11 +195,15 @@ class Engine:
 
         wf_state = WorkflowState(name=workflow_name, args=list(args))
         if workdir:
-            from workflows.isolation.base import scan_git_branches
             wf_dir = Path(workdir).resolve() / execution_id / root_workflow_id
             wf_dir.mkdir(parents=True, exist_ok=True)
             wf_state.workdir = str(wf_dir)
             wf_state.branches = scan_git_branches(wf_dir)
+
+        # Create conversation for root workflow
+        conv_id = _uuid()
+        wf_state.conversation_id = conv_id
+        store.create_conversation(conv_id)
 
         state = ExecutionState(
             workflows={root_workflow_id: wf_state},
@@ -307,7 +316,7 @@ class Engine:
                 wf.status = 'finished'
                 wf.result = e.value
                 wf.checkpoint = None
-                self._register_children(state, ctx, new_events, execution_id, workflow_id)
+                self._register_children(state, ctx, new_events, execution_id, workflow_id, store)
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='inbox',
@@ -317,7 +326,7 @@ class Engine:
             finally:
                 _current_ctx.reset(token)
 
-            self._register_children(state, ctx, new_events, execution_id, workflow_id)
+            self._register_children(state, ctx, new_events, execution_id, workflow_id, store)
             wf.checkpoint = pickle.loads(g.save())
 
             if isinstance(val, WaitOp):
@@ -423,17 +432,25 @@ class Engine:
                 provider = val.provider
                 if provider is None:
                     raise RuntimeError('LlmOp requires a provider instance')
+                # Resolve messages: conversation wins over explicit messages
+                messages = val.messages
+                if val.conversation is not None and store and wf.conversation_id:
+                    conv_id = wf.conversation_id
+                    conv_msgs = store.conv_read_messages(conv_id)
+                    messages = [{'role': m.role, 'content': m.content} for m in conv_msgs]
+                if not messages:
+                    raise RuntimeError('LlmOp requires messages or conversation')
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
                     workflow_id=workflow_id, category='outbox',
                     payload=ev.LlmRequest(
-                        messages=val.messages, model=val.model,
+                        messages=messages, model=val.model,
                         max_tokens=val.max_tokens, temperature=val.temperature,
                         system=val.system, tools=val.tools,
                     ),
                 ))
                 result = provider.complete(
-                    messages=val.messages, model=val.model,
+                    messages=messages, model=val.model,
                     max_tokens=val.max_tokens, temperature=val.temperature,
                     system=val.system, tools=val.tools,
                 )
@@ -450,6 +467,103 @@ class Engine:
                         message_id=result.message_id,
                     ),
                 ))
+            elif isinstance(val, ConvAppendOp) and store and wf.conversation_id:
+                ref = store.conv_append_message(wf.conversation_id, val.role, val.content)
+                wf.send_val = ref
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.ConvAppendRequest(
+                        conversation_id=wf.conversation_id, role=val.role, content=val.content),
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    payload=ev.ConvAppendResult(
+                        conversation_id=ref.conversation_id,
+                        message_id=ref.message_id, layer=ref.layer),
+                ))
+            elif isinstance(val, ConvReadOp) and store and wf.conversation_id:
+                messages = store.conv_read_messages(wf.conversation_id)
+                wf.send_val = messages
+                resolved = store.conv_resolve_ref(wf.conversation_id)
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.ConvReadRequest(
+                        conversation_id=resolved.conversation_id,
+                        end_message_id=resolved.message_id,
+                        layer=resolved.layer),
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    payload=ev.ConvReadResult(
+                        count=len(messages),
+                        message_refs=[{'conversation_id': m.ref.conversation_id,
+                                       'message_id': m.ref.message_id,
+                                       'layer': m.ref.layer} for m in messages]),
+                ))
+            elif isinstance(val, ConvSearchOp) and store and wf.conversation_id:
+                messages = store.conv_search_messages(wf.conversation_id, val.pattern)
+                wf.send_val = messages
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.ConvSearchRequest(
+                        conversation_id=wf.conversation_id, pattern=val.pattern),
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    payload=ev.ConvSearchResult(
+                        count=len(messages),
+                        message_refs=[{'conversation_id': m.ref.conversation_id,
+                                       'message_id': m.ref.message_id,
+                                       'layer': m.ref.layer} for m in messages]),
+                ))
+            elif isinstance(val, ConvGetOp) and store:
+                messages = store.conv_get_messages(val.refs)
+                wf.send_val = messages
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.ConvGetRequest(
+                        message_refs=[{'conversation_id': r.conversation_id,
+                                       'message_id': r.message_id,
+                                       'layer': r.layer} for r in val.refs]),
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    payload=ev.ConvGetResult(count=len(messages)),
+                ))
+            elif isinstance(val, ConvReplaceWithOp) and store and wf.conversation_id:
+                start_id = val.start_ref.message_id if val.start_ref else None
+                end_id = val.end_ref.message_id if val.end_ref else None
+                new_refs = store.conv_replace_with(
+                    wf.conversation_id, val.new_messages, start_id, end_id,
+                )
+                wf.send_val = new_refs
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.ConvReplaceWithRequest(
+                        conversation_id=wf.conversation_id,
+                        new_messages=val.new_messages,
+                        start_message_id=start_id,
+                        end_message_id=end_id),
+                ))
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    payload=ev.ConvReplaceWithResult(
+                        conversation_id=wf.conversation_id,
+                        new_layer=new_refs[0].layer if new_refs else 0,
+                        new_message_refs=[{'conversation_id': r.conversation_id,
+                                           'message_id': r.message_id,
+                                           'layer': r.layer} for r in new_refs]),
+                ))
             else:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
@@ -459,11 +573,11 @@ class Engine:
 
         return new_events
 
-    def _register_children(self, state, ctx, new_events, execution_id, parent_workflow_id):
+    def _register_children(self, state, ctx, new_events, execution_id, parent_workflow_id, store=None):
         for handle in ctx.new_children:
-            self._register_child(state, handle, new_events, execution_id, parent_workflow_id)
+            self._register_child(state, handle, new_events, execution_id, parent_workflow_id, store)
 
-    def _register_child(self, state, handle, new_events, execution_id, parent_workflow_id):
+    def _register_child(self, state, handle, new_events, execution_id, parent_workflow_id, store=None):
         parent_wf = state.workflows.get(parent_workflow_id) if parent_workflow_id else None
 
         config = handle.storage or StorageConfig(mode='same')
@@ -483,6 +597,18 @@ class Engine:
             )
             child_wf.workdir = str(child_workdir)
             child_wf.branches = child_branches
+
+        # Fork conversation from parent
+        if store and parent_wf and parent_wf.conversation_id:
+            child_conv_id = _uuid()
+            parent_ref = store.conv_resolve_ref(parent_wf.conversation_id)
+            store.create_conversation(
+                child_conv_id,
+                parent_conversation_id=parent_ref.conversation_id,
+                parent_message_id=parent_ref.message_id,
+                parent_layer=parent_ref.layer,
+            )
+            child_wf.conversation_id = child_conv_id
 
         state.workflows[handle.id] = child_wf
 

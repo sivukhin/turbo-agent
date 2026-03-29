@@ -314,6 +314,107 @@ def cmd_inspect(args):
     console.print(root_tree)
 
 
+def cmd_conv(args):
+    store = Store(DB_PATH)
+    state, _ = store.load_state(args.id)
+
+    # Collect all conversation_ids from workflows (active + from events for pruned ones)
+    conv_ids = {}
+    for wf_id, wf in state.workflows.items():
+        if wf.conversation_id:
+            conv_ids[wf.conversation_id] = (wf_id, wf.name)
+
+    # Also scan outbox for spawned workflows that may have been pruned
+    outbox = store.read_outbox(args.id)
+    from workflows.events import WorkflowSpawned
+    for event in outbox:
+        if isinstance(event.payload, WorkflowSpawned):
+            child_id = event.payload.child_workflow_id
+            # Try to find conversation for this workflow in refs table
+            cur = store.conn.cursor()
+            cur.execute(
+                "SELECT conversation_id FROM conversation_refs "
+                "WHERE conversation_id LIKE ? ORDER BY conversation_id",
+                (f'%',),
+            )
+
+    if args.workflow_id:
+        # Show conversation for a specific workflow
+        wf = state.workflows.get(args.workflow_id)
+        if not wf:
+            console.print(f'[red]Workflow {args.workflow_id} not found in active state[/]')
+            store.close()
+            sys.exit(1)
+        if not wf.conversation_id:
+            console.print(f'[yellow]Workflow {args.workflow_id} has no conversation[/]')
+            store.close()
+            return
+        _print_conversation(store, wf.conversation_id, wf.name, args.workflow_id)
+    else:
+        # Show conversations for all active workflows
+        for wf_id, wf in sorted(state.workflows.items()):
+            if wf.conversation_id:
+                _print_conversation(store, wf.conversation_id, wf.name, wf_id)
+                console.print()
+
+    store.close()
+
+
+def _print_conversation(store, conversation_id, wf_name, wf_id):
+    messages = store.conv_read_messages(conversation_id)
+    ref = store.conv_resolve_ref(conversation_id)
+
+    # Check for parent
+    cur = store.conn.cursor()
+    cur.execute(
+        "SELECT parent_conversation_id FROM conversation_refs WHERE conversation_id = ?",
+        (conversation_id,),
+    )
+    row = cur.fetchone()
+    parent = row[0] if row and row[0] else None
+
+    console.print(
+        f'[bold]{wf_name}[/] [dim]{wf_id[:8]}[/]  '
+        f'conv=[cyan]{conversation_id[:8]}[/]  '
+        f'{len(messages)} messages'
+        + (f'  [dim]parent={parent[:8]}[/]' if parent else '')
+    )
+
+    if not messages:
+        console.print('  [dim](empty)[/]')
+        return
+
+    role_style = {
+        'user': 'green',
+        'assistant': 'blue',
+        'system': 'yellow',
+        'tool_result': 'magenta',
+    }
+
+    table = Table(show_lines=False, show_header=True, padding=(0, 1))
+    table.add_column('#', style='dim', width=4)
+    table.add_column('role', width=10)
+    table.add_column('content')
+    table.add_column('ref', style='dim', width=12)
+
+    for i, msg in enumerate(messages):
+        style = role_style.get(msg.role, 'white')
+        content = msg.content
+        if len(content) > 120:
+            content = content[:117] + '...'
+        # Show if message came from parent conversation
+        from_parent = msg.ref.conversation_id != conversation_id
+        parent_tag = ' [dim](parent)[/]' if from_parent else ''
+        table.add_row(
+            str(i),
+            Text(msg.role, style=style),
+            content + parent_tag,
+            msg.ref.message_id[:10],
+        )
+
+    console.print(table)
+
+
 def cmd_list(args):
     store = Store(DB_PATH)
     all_execs = store.list_executions()

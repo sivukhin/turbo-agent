@@ -89,6 +89,63 @@ class LlmResponse:
     message_id: str | None = None
 
 
+# ---- Conversation events ----
+
+@dataclass
+class ConvAppendRequest:
+    conversation_id: str
+    role: str
+    content: str
+
+@dataclass
+class ConvAppendResult:
+    conversation_id: str
+    message_id: str
+    layer: int
+
+@dataclass
+class ConvReadRequest:
+    conversation_id: str
+    end_message_id: str | None
+    layer: int | None
+
+@dataclass
+class ConvReadResult:
+    count: int
+    message_refs: list        # [{"conversation_id", "message_id", "layer"}]
+
+@dataclass
+class ConvSearchRequest:
+    conversation_id: str
+    pattern: str
+
+@dataclass
+class ConvSearchResult:
+    count: int
+    message_refs: list
+
+@dataclass
+class ConvGetRequest:
+    message_refs: list
+
+@dataclass
+class ConvGetResult:
+    count: int
+
+@dataclass
+class ConvReplaceWithRequest:
+    conversation_id: str
+    new_messages: list        # [{"role", "content"}]
+    start_message_id: str | None
+    end_message_id: str | None
+
+@dataclass
+class ConvReplaceWithResult:
+    conversation_id: str
+    new_layer: int
+    new_message_refs: list    # [{"conversation_id", "message_id", "layer"}]
+
+
 # ---- registry ----
 
 def _to_snake(name: str) -> str:
@@ -106,6 +163,11 @@ _ALL_PAYLOADS = [
     WaitStarted, SleepStarted,
     WorkflowSpawned,
     LlmRequest, LlmResponse,
+    ConvAppendRequest, ConvAppendResult,
+    ConvReadRequest, ConvReadResult,
+    ConvSearchRequest, ConvSearchResult,
+    ConvGetRequest, ConvGetResult,
+    ConvReplaceWithRequest, ConvReplaceWithResult,
 ]
 
 PAYLOAD_REGISTRY: dict[str, type] = {

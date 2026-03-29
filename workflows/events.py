@@ -67,6 +67,27 @@ class WorkflowSpawned:
     parent_workflow_id: str | None
     storage_mode: str   # 'same' | 'copy-full' | 'copy-git' | 'branch'
 
+@dataclass
+class LlmRequest:
+    """Request to an LLM. Provider-agnostic."""
+    messages: list          # [{"role": "user"|"assistant"|"system", "content": str|list}]
+    model: str = 'claude-sonnet-4-20250514'
+    max_tokens: int | None = None
+    temperature: float = 0.0
+    system: str | None = None
+    tools: list | None = None           # [{"name": str, "description": str, "input_schema": dict}]
+
+@dataclass
+class LlmResponse:
+    """Response from an LLM."""
+    content: list               # [{"type": "text", "text": str} | {"type": "tool_use", "id": str, "name": str, "input": dict}]
+    model: str
+    stop_reason: str | None     # "end_turn"|"tool_use"|"max_tokens"|"stop_sequence"
+    usage: dict | None          # {"input_tokens": int, "output_tokens": int}
+    text: str = ''              # concatenated text from text blocks
+    tool_calls: list | None = None  # [{"id": str, "name": str, "input": dict}] parsed tool calls
+    message_id: str | None = None
+
 
 # ---- registry ----
 
@@ -84,6 +105,7 @@ _ALL_PAYLOADS = [
     FileWriteRequest, FileWriteResult,
     WaitStarted, SleepStarted,
     WorkflowSpawned,
+    LlmRequest, LlmResponse,
 ]
 
 PAYLOAD_REGISTRY: dict[str, type] = {

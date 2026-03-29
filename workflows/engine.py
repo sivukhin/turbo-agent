@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
+from workflows.events import payload_type_name
+from workflows.isolation.base import StorageConfig, setup_child_workspace, scan_git_branches
 import workflows.events as ev
 
 
@@ -87,6 +89,37 @@ def write_file(path, content):
     return WriteFileOp(path=path, content=content)
 
 
+@dataclass
+class LlmOp:
+    """Yield this to make an LLM call."""
+    messages: list
+    provider: object = None  # LlmProvider instance
+    model: str = 'claude-sonnet-4-20250514'
+    max_tokens: int | None = None
+    temperature: float = 0.0
+    system: str | None = None
+    tools: list | None = None
+
+
+def llm(messages, *, provider=None, model='claude-sonnet-4-20250514',
+        max_tokens=None, temperature=0.0, system=None, tools=None):
+    """Make an LLM call. Returns LlmResult with .text, .tool_calls, .usage.
+
+        response = yield llm(
+            messages=[{"role": "user", "content": "Hello"}],
+            provider=my_provider,
+        )
+        print(response.text)
+        for tc in response.tool_calls:
+            print(tc.name, tc.input)
+    """
+    return LlmOp(
+        messages=messages, provider=provider, model=model,
+        max_tokens=max_tokens, temperature=temperature, system=system,
+        tools=tools,
+    )
+
+
 # ---- state ----
 
 @dataclass
@@ -118,7 +151,6 @@ class Event:
 
     @property
     def type(self) -> str:
-        from workflows.events import payload_type_name
         return payload_type_name(self.payload)
 
 
@@ -345,7 +377,6 @@ class Engine:
                     payload=ev.ShellRequest(command=val.command),
                 ))
                 result = isolation.run_shell(workdir, val.command)
-                from workflows.isolation.base import scan_git_branches
                 wf.branches = scan_git_branches(workdir)
                 wf.send_val = result
                 new_events.append(Event(
@@ -388,6 +419,37 @@ class Engine:
                     workflow_id=workflow_id, category='inbox',
                     payload=ev.FileWriteResult(path=val.path, size=len(val.content)),
                 ))
+            elif isinstance(val, LlmOp):
+                provider = val.provider
+                if provider is None:
+                    raise RuntimeError('LlmOp requires a provider instance')
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='outbox',
+                    payload=ev.LlmRequest(
+                        messages=val.messages, model=val.model,
+                        max_tokens=val.max_tokens, temperature=val.temperature,
+                        system=val.system, tools=val.tools,
+                    ),
+                ))
+                result = provider.complete(
+                    messages=val.messages, model=val.model,
+                    max_tokens=val.max_tokens, temperature=val.temperature,
+                    system=val.system, tools=val.tools,
+                )
+                wf.send_val = result
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=workflow_id, category='inbox',
+                    payload=ev.LlmResponse(
+                        content=result.content, model=result.model,
+                        stop_reason=result.stop_reason, usage=result.usage,
+                        text=result.text,
+                        tool_calls=[{'id': tc.id, 'name': tc.name, 'input': tc.input}
+                                    for tc in result.tool_calls] or None,
+                        message_id=result.message_id,
+                    ),
+                ))
             else:
                 new_events.append(Event(
                     event_id=0, execution_id=execution_id,
@@ -402,7 +464,6 @@ class Engine:
             self._register_child(state, handle, new_events, execution_id, parent_workflow_id)
 
     def _register_child(self, state, handle, new_events, execution_id, parent_workflow_id):
-        from workflows.isolation.base import StorageConfig, setup_child_workspace
         parent_wf = state.workflows.get(parent_workflow_id) if parent_workflow_id else None
 
         config = handle.storage or StorageConfig(mode='same')

@@ -224,6 +224,23 @@ def _format_payload(payload):
     if isinstance(payload, ev.WorkflowSpawned):
         parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else '-'
         return f'{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}'
+    if isinstance(payload, ev.LlmRequest):
+        n_msgs = len(payload.messages)
+        tools = f', {len(payload.tools)} tools' if payload.tools else ''
+        return f'{payload.model} ({n_msgs} msgs{tools}, T={payload.temperature})'
+    if isinstance(payload, ev.LlmResponse):
+        texts = [b['text'][:60] for b in payload.content if b.get('type') == 'text']
+        tool_calls = [b['name'] for b in payload.content if b.get('type') == 'tool_use']
+        parts = []
+        if texts:
+            parts.append(f'text={texts[0]!r}{"..." if len(texts[0]) >= 60 else ""}')
+        if tool_calls:
+            parts.append(f'tools=[{", ".join(tool_calls)}]')
+        if payload.stop_reason:
+            parts.append(f'stop={payload.stop_reason}')
+        if payload.usage:
+            parts.append(f'tokens={payload.usage.get("input_tokens",0)}+{payload.usage.get("output_tokens",0)}')
+        return ', '.join(parts)
     return repr(payload)
 
 

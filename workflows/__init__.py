@@ -1,8 +1,8 @@
 from workflows.decorator import workflow, DurableGenerator
 from workflows.engine import (
     Engine, ExecutionState, WorkflowState, WorkflowHandle,
-    HandlerState, Event, WaitOp, SleepOp, ShellOp, ReadFileOp, WriteFileOp,
-    wait, wait_all, wait_any, sleep, shell, read_file, write_file,
+    HandlerState, Event, WaitOp, SleepOp, ShellOp, ReadFileOp, WriteFileOp, LlmOp,
+    wait, wait_all, wait_any, sleep, shell, read_file, write_file, llm,
 )
 from workflows.handlers import (
     WaitHandler, WaitAllHandler, WaitAnyHandler, SleepHandler,

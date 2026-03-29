@@ -47,27 +47,27 @@ function ExecList({ executions, currentId, onSelect, onUpdateDescription }) {
             <div
               className={`flex-1 min-w-0 px-3 py-2 rounded-md cursor-pointer transition border ${active ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-100 border-transparent'}`}
               onClick={() => onSelect(e.execution_id)}>
-            <div className="flex items-start gap-1.5">
-              <div className="flex-1">
-                {isEditing ? (
-                  <input ref={inputRef} value={editValue} onChange={ev => setEditValue(ev.target.value)}
-                    onClick={ev => ev.stopPropagation()}
-                    onBlur={() => saveEdit(e.execution_id)}
-                    onKeyDown={ev => { if (ev.key === 'Enter') saveEdit(e.execution_id); if (ev.key === 'Escape') setEditingId(null); }}
-                    className="text-xs text-gray-600 border border-gray-300 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                ) : (
-                  <div className="text-sm font-medium text-gray-800">{e.description || '???'}</div>
-                )}
-                <div className="text-xs text-gray-400">{e.workflow}</div>
+              <div className="flex items-start gap-1.5">
+                <div className="flex-1">
+                  {isEditing ? (
+                    <input ref={inputRef} value={editValue} onChange={ev => setEditValue(ev.target.value)}
+                      onClick={ev => ev.stopPropagation()}
+                      onBlur={() => saveEdit(e.execution_id)}
+                      onKeyDown={ev => { if (ev.key === 'Enter') saveEdit(e.execution_id); if (ev.key === 'Escape') setEditingId(null); }}
+                      className="text-xs text-gray-600 border border-gray-300 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  ) : (
+                    <div className="text-sm font-medium text-gray-800">{e.description || '???'}</div>
+                  )}
+                  <div className="text-xs text-gray-400">{e.workflow}</div>
+                </div>
+                <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${statusCls}`}>{statusText}</span>
               </div>
-              <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${statusCls}`}>{statusText}</span>
+              <div className="text-[10px] text-gray-300 mt-0.5 font-mono flex items-center gap-1.5 truncate">
+                <span>{e.execution_id.substring(0, 8)}</span>
+                {e.created_at ? <span>{formatTime(e.created_at)}</span> : null}
+                {e.total_cost > 0 && <span className="text-emerald-500">{formatCost(e.total_cost)}</span>}
+              </div>
             </div>
-            <div className="text-[10px] text-gray-300 mt-0.5 font-mono flex items-center gap-1.5 truncate">
-              <span>{e.execution_id.substring(0, 8)}</span>
-              {e.created_at ? <span>{formatTime(e.created_at)}</span> : null}
-              {e.total_cost > 0 && <span className="text-emerald-500">{formatCost(e.total_cost)}</span>}
-            </div>
-          </div>
           </div>
         );
       })}
@@ -100,7 +100,7 @@ function WorkflowTree({ exec, selectedWfId, onSelectWf }) {
     return (
       <div key={id}>
         <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer text-xs ${active ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer text-xs ${active ? 'bg-blue-50 text-gray-700' : 'hover:bg-gray-100 text-gray-700'}`}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           onClick={() => onSelectWf(id)}>
           <span className={`inline-block w-1.5 h-1.5 rounded-full ${statusDot} bg-current shrink-0 ${awaiting ? 'animate-pulse' : ''}`} />
@@ -153,7 +153,7 @@ function renderContent(content) {
           return <div key={i} className="text-xs text-gray-500">{JSON.stringify(block)}</div>;
         });
       }
-    } catch {}
+    } catch { }
     return content;
   }
   return String(content);
@@ -223,9 +223,9 @@ function UsageSteps({ usage }) {
   if (!usage || usage.steps.length <= 1) return null;
   const b = 'bg-gray-100 text-gray-500 rounded px-1 py-0.5';
   return (
-    <div className="mt-1 text-xs text-gray-400">
+    <div className="mt-1 text-xs" style={{ color: '#9ca3af' }}>
       <span className="cursor-pointer select-none" onClick={() => setExpanded(!expanded)}>
-        {expanded ? '\u25BC' : '\u25B6'} {usage.steps.length} steps {usage.llm_time > 0 && `(${formatDuration(usage.llm_time)} llm)`}
+        {expanded ? '\u25BE' : '\u25B8'} {usage.steps.length} steps {usage.llm_time > 0 && `(${formatDuration(usage.llm_time)} llm)`}
       </span>
       {expanded && (
         <div className="mt-1 ml-2 space-y-0.5 border-l-2 border-gray-100 pl-2">
@@ -317,7 +317,7 @@ function ChatView({ execId, exec, showAll, selectedWfId }) {
     }
     api(`/api/executions/${execId}/conversation/${convId}`)
       .then(setMessages)
-      .catch(() => {});
+      .catch(() => { });
   }, [execId, exec, convId]);
 
   useEffect(() => {
@@ -365,7 +365,7 @@ function JsonTree({ data, depth = 0 }) {
     return (
       <span>
         <span className="cursor-pointer text-gray-400 hover:text-gray-600 select-none" onClick={() => setExpanded(!expanded)}>
-          {expanded ? '\u25BC' : '\u25B6'} [{data.length}]
+          {expanded ? '\u25BE' : '\u25B8'} [{data.length}]
         </span>
         {expanded && (
           <div className="ml-4 border-l border-gray-200 pl-2">
@@ -383,7 +383,7 @@ function JsonTree({ data, depth = 0 }) {
     return (
       <span>
         <span className="cursor-pointer text-gray-400 hover:text-gray-600 select-none" onClick={() => setExpanded(!expanded)}>
-          {expanded ? '\u25BC' : '\u25B6'} {'{' + keys.length + '}'}
+          {expanded ? '\u25BE' : '\u25B8'} {'{' + keys.length + '}'}
         </span>
         {expanded && (
           <div className="ml-4 border-l border-gray-200 pl-2">
@@ -407,7 +407,7 @@ function EventRow({ e }) {
   return (
     <div className="border-b border-gray-50">
       <div className="flex gap-2 px-3 py-1 items-baseline hover:bg-gray-50 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <span className="w-4 text-gray-400 select-none">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <span className="w-4 text-gray-400 select-none">{expanded ? '\u25BE' : '\u25B8'}</span>
         <span className="w-8 text-right text-gray-400">{e.event_id}</span>
         <span className="w-16 text-gray-400 tabular-nums">{formatTime(e.created_at)}</span>
         <span className={`w-12 ${catCls} font-medium`}>{e.category}</span>
@@ -431,7 +431,7 @@ function EventsView({ execId, exec }) {
 
   useEffect(() => {
     if (!execId) { setEvents([]); prevLenRef.current = 0; return; }
-    api(`/api/executions/${execId}/events`).then(setEvents).catch(() => {});
+    api(`/api/executions/${execId}/events`).then(setEvents).catch(() => { });
   }, [execId, exec]);
 
   useEffect(() => {
@@ -467,7 +467,7 @@ function PromptInput({ execId, exec, onSent }) {
 
   useEffect(() => {
     if (!execId) { setPrompts([]); return; }
-    api(`/api/executions/${execId}/prompts`).then(setPrompts).catch(() => {});
+    api(`/api/executions/${execId}/prompts`).then(setPrompts).catch(() => { });
   }, [execId, exec]);
 
   const pending = prompts.length > 0 ? prompts[0] : null;
@@ -548,7 +548,7 @@ export default function App() {
       const execs = await api('/api/executions');
       execs.sort((a, b) => b.execution_id.localeCompare(a.execution_id));
       setExecutions(execs);
-    } catch {}
+    } catch { }
   }, []);
 
   const refreshExec = useCallback(async () => {
@@ -556,7 +556,7 @@ export default function App() {
     try {
       const ex = await api(`/api/executions/${currentId}`);
       setExec(ex);
-    } catch {}
+    } catch { }
   }, [currentId]);
 
   // Poll executions list

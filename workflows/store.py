@@ -71,14 +71,19 @@ class Store:
 
     def append_event(self, execution_id: str, workflow_id: str | None,
                      category: str, payload) -> None:
-        """Append an event. payload is a typed dataclass from workflows.events."""
+        """Append a single event with immediate commit."""
+        self.append_events([(execution_id, workflow_id, category, payload)])
+
+    def append_events(self, events: list[tuple]) -> None:
+        """Batch-append events. Each tuple: (execution_id, workflow_id, category, payload)."""
         cur = self.conn.cursor()
-        cur.execute(
-            """INSERT INTO events (execution_id, workflow_id, category, type, payload)
-               VALUES (?, ?, ?, ?, ?)""",
-            (execution_id, workflow_id, category,
-             payload_type_name(payload), serialize_payload(payload)),
-        )
+        for execution_id, workflow_id, category, payload in events:
+            cur.execute(
+                """INSERT INTO events (execution_id, workflow_id, category, type, payload)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (execution_id, workflow_id, category,
+                 payload_type_name(payload), serialize_payload(payload)),
+            )
         self.conn.commit()
 
     def _read_events(self, execution_id: str, category: str,

@@ -189,10 +189,13 @@ class Engine:
         self._try_resolve_handlers(state, now)
         self._check_finished(state)
 
-        # Write events and save state
+        # Write events and save state in one batch
         store.save_state(execution_id, state, last_processed_event_id=last_processed)
-        for e in new_events:
-            store.append_event(e.execution_id, e.workflow_id, e.category, e.payload)
+        if new_events:
+            store.append_events([
+                (e.execution_id, e.workflow_id, e.category, e.payload)
+                for e in new_events
+            ])
 
         # Process new inbox events — only resolve handlers, don't re-tick.
         # Unblocked workflows will be ticked on the next step().

@@ -125,6 +125,65 @@ class SleepHandler:
         return False
 
 
+class StreamNextHandler:
+    """Polls the stream queue for the next line. Resolves when a line is available."""
+    @staticmethod
+    def initial_state(stream_id):
+        return {'stream_id': stream_id}
+
+    @staticmethod
+    def on_event(event_type, event_workflow_id, payload, state):
+        return state
+
+    @staticmethod
+    def resolve(state, wf, now):
+        from workflows.ops import ShellStreamLine
+        from workflows.events import ShellStreamLine as EvShellStreamLine
+        from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
+
+        stream_id = state.get('stream_id')
+        if not stream_id:
+            return False
+
+        with _streams_lock:
+            q = _active_streams.get(stream_id)
+        if not q:
+            line = ShellStreamLine(stdout=[], stderr=[], finished=True, exit_code=-1)
+            wf.status = 'running'
+            wf.send_val = line
+            state.setdefault('_emit_events', []).append(
+                EvShellStreamLine(stream_id=stream_id, stdout=[], stderr=[], finished=True, exit_code=-1))
+            return True
+
+        try:
+            item = q.get_nowait()
+        except Exception:
+            return False
+
+        if len(item) == 3:
+            # Sentinel: (stdout_lines, stderr_lines, exit_code)
+            stdout_lines, stderr_lines, exit_code = item
+            line = ShellStreamLine(stdout=stdout_lines, stderr=stderr_lines, finished=True, exit_code=exit_code)
+            wf.status = 'running'
+            wf.send_val = line
+            state.setdefault('_emit_events', []).append(
+                EvShellStreamLine(stream_id=stream_id, stdout=stdout_lines, stderr=stderr_lines, finished=True, exit_code=exit_code))
+            with _streams_lock:
+                _active_streams.pop(stream_id, None)
+            from workflows.operations.shell_stream_op import _stream_private_envs
+            _stream_private_envs.pop(stream_id, None)
+            return True
+
+        # Regular line: (stdout_lines, stderr_lines)
+        stdout_lines, stderr_lines = item
+        line = ShellStreamLine(stdout=stdout_lines, stderr=stderr_lines, finished=False)
+        wf.status = 'running'
+        wf.send_val = line
+        state.setdefault('_emit_events', []).append(
+            EvShellStreamLine(stream_id=stream_id, stdout=stdout_lines, stderr=stderr_lines, finished=False))
+        return True
+
+
 # ---- Registry ----
 
 HANDLER_REGISTRY = {
@@ -132,4 +191,5 @@ HANDLER_REGISTRY = {
     'wait_all': WaitAllHandler,
     'wait_any': WaitAnyHandler,
     'sleep': SleepHandler,
+    'stream_next': StreamNextHandler,
 }

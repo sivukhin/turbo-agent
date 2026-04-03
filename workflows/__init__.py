@@ -1,8 +1,9 @@
 from workflows.decorator import workflow, DurableGenerator
 from workflows.ops import (
     Event, WorkflowHandle, WorkflowState, HandlerState, ExecutionState,
-    WaitOp, SleepOp, ShellOp, ReadFileOp, WriteFileOp, AiOp, UserPromptOp, AiResponseOp,
-    wait, wait_all, wait_any, sleep, shell, read_file, write_file, ai, user_prompt, ai_response,
+    WaitOp, SleepOp, ShellOp, ShellStreamStartOp, ShellStreamNextOp, ShellStreamLine, StreamDef,
+    ReadFileOp, WriteFileOp, AiOp, UserPromptOp, AiResponseOp,
+    wait, wait_all, wait_any, sleep, shell, shell_stream_start, shell_stream_next, read_file, write_file, ai, user_prompt, ai_response,
 )
 from workflows.engine import Engine, EngineConfig
 from workflows.conversation import (

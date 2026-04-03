@@ -18,6 +18,27 @@ class SleepOp:
 class ShellOp:
     command: str
     isolation: object = None
+    public_env: dict | None = None
+    private_env: dict | None = None
+
+@dataclass
+class ShellStreamStartOp:
+    command: str
+    isolation: object = None
+    public_env: dict | None = None
+    private_env: dict | None = None
+
+@dataclass
+class ShellStreamNextOp:
+    stream_id: str
+    private_env: dict | None = None
+
+@dataclass
+class ShellStreamLine:
+    stdout: list[str]
+    stderr: list[str]
+    finished: bool = False
+    exit_code: int | None = None
 
 @dataclass
 class ReadFileOp:
@@ -61,8 +82,14 @@ def wait_any(handles):
 def sleep(seconds):
     return SleepOp(seconds=seconds)
 
-def shell(command, isolation=None):
-    return ShellOp(command=command, isolation=isolation)
+def shell(command, isolation=None, public_env=None, private_env=None):
+    return ShellOp(command=command, isolation=isolation, public_env=public_env, private_env=private_env)
+
+def shell_stream_start(command, isolation=None, public_env=None, private_env=None):
+    return ShellStreamStartOp(command=command, isolation=isolation, public_env=public_env, private_env=private_env)
+
+def shell_stream_next(stream_id, private_env=None):
+    return ShellStreamNextOp(stream_id=stream_id, private_env=private_env)
 
 def read_file(path):
     return ReadFileOp(path=path)
@@ -138,6 +165,17 @@ class HandlerState:
     state: dict
 
 @dataclass
+class StreamDef:
+    """Persisted stream definition — enough info to restart a stream after crash.
+    Only public env is stored. Private env (secrets) must be re-supplied."""
+    stream_id: str
+    command: str
+    isolation_type: str
+    isolation_config: dict | None
+    public_env: dict | None
+    workflow_id: str
+
+@dataclass
 class ExecutionState:
     workflows: dict[str, WorkflowState]
     handlers: dict[str, HandlerState]
@@ -145,3 +183,4 @@ class ExecutionState:
     source_file: str | None = None
     finished: bool = False
     description: str = ''
+    streams: dict[str, StreamDef] = field(default_factory=dict)

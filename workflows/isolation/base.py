@@ -13,7 +13,7 @@ class ShellResult:
 
 class Isolation(Protocol):
     """Protocol for running shell commands in a workspace directory."""
-    def run_shell(self, workdir: Path, command: str) -> ShellResult: ...
+    def run_shell(self, workdir: Path, command: str, env: dict | None = None) -> ShellResult: ...
 
 
 @dataclass

@@ -21,7 +21,9 @@ class ShellRequestHandler:
             return []
         workdir = Path(wf.workdir)
         isolation = _make_isolation(payload.isolation_type, payload.isolation_config)
-        result = isolation.run_shell(workdir, payload.command)
+        from workflows.operations.shell_op import _private_envs
+        merged_env = {**(payload.public_env or {}), **_private_envs.pop(event.workflow_id, {})}
+        result = isolation.run_shell(workdir, payload.command, env=merged_env or None)
         wf.branches = scan_git_branches(workdir)
         resolve_wf(state, event.workflow_id, result)
         return [make_inbox_event(event, ev.ShellResult(

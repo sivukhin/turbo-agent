@@ -88,7 +88,17 @@ def cmd_step(args):
     last_inbox = inbox_before[-1].event_id if inbox_before else 0
     last_outbox = outbox_before[-1].event_id if outbox_before else 0
 
+    trace = getattr(args, 'trace', False)
+
+    def _on_events(events):
+        _print_step_events(
+            [e for e in events if e.category == 'inbox'],
+            [e for e in events if e.category == 'outbox'],
+            trace=trace,
+        )
+
     engine = Engine(EngineConfig(workflows_registry=registry))
+    engine.config.on_events = _on_events
     try:
         engine.step(store, args.id)
     except Exception as e:
@@ -155,16 +165,91 @@ def _handle_user_prompts(store, execution_id, engine, trace=False):
             console.print(f'  [bold green]returned:[/] {root.result!r}')
 
 
+def _print_claude_stream_line(line):
+    """Parse a Claude Code stream-json line and print it readably."""
+    if not line.strip():
+        return
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        console.print(f'[dim]{line[:200]}[/]')
+        return
+
+    etype = event.get('type')
+    subtype = event.get('subtype', '')
+
+    if etype == 'system':
+        if subtype == 'init':
+            console.print(f'[dim]claude: session started (model={event.get("model", "?")})[/]')
+        elif subtype == 'task_started':
+            console.print(f'[dim]claude: agent> {event.get("description", "")}[/]')
+        elif subtype == 'task_progress':
+            desc = event.get('description', '')
+            usage = event.get('usage', {})
+            console.print(f'[dim]claude: {desc} (tokens={usage.get("total_tokens", 0)})[/]')
+
+    elif etype == 'assistant':
+        msg = event.get('message', {})
+        for block in msg.get('content', []):
+            btype = block.get('type')
+            if btype == 'text':
+                text = block.get('text', '')
+                if text.strip():
+                    console.print(f'[blue]claude>[/] {text[:300]}{"..." if len(text) > 300 else ""}')
+            elif btype == 'tool_use':
+                name = block.get('name', '?')
+                inp = block.get('input', {})
+                inp_str = str(inp)
+                if len(inp_str) > 150:
+                    inp_str = inp_str[:147] + '...'
+                console.print(f'[magenta]claude tool>[/] {name}({inp_str})')
+            elif btype == 'thinking':
+                thinking = block.get('thinking', '')
+                if thinking.strip():
+                    console.print(f'[dim italic]claude thinking> {thinking[:200]}{"..." if len(thinking) > 200 else ""}[/]')
+
+    elif etype == 'user':
+        msg = event.get('message', {})
+        for block in msg.get('content', []):
+            if isinstance(block, dict) and block.get('type') == 'tool_result':
+                content = block.get('content', '')
+                is_error = block.get('is_error', False)
+                if isinstance(content, list):
+                    content = '\n'.join(b.get('text', '') for b in content if isinstance(b, dict))
+                content = str(content)
+                if len(content) > 300:
+                    content = content[:297] + '...'
+                if is_error:
+                    console.print(f'[red]claude result>[/] {content}')
+                else:
+                    console.print(f'[cyan]claude result>[/] {content}')
+
+    elif etype == 'result':
+        result = event.get('result', '')
+        if result:
+            console.print(f'[bold green]claude done>[/] {str(result)[:500]}')
+
+
 def _print_step_events(inbox, outbox, trace=False):
     all_events = sorted(inbox + outbox, key=lambda e: e.event_id)
     for event in all_events:
         payload = event.payload
         if not trace:
-            # In non-trace mode, only show user-facing events
             if isinstance(payload, ev.AiResponseEvent):
                 console.print(f'[bold blue]Assistant>[/] {payload.text}')
                 continue
-            # Skip everything else
+            if isinstance(payload, ev.ConvAppendRequest):
+                labels = (payload.meta or {}).get('labels', '') if hasattr(payload, 'meta') else ''
+                hidden = 'hidden' in labels.split(',')
+                role_style = {'user': 'green', 'assistant': 'blue', 'tool_use': 'magenta', 'tool_result': 'cyan'}.get(payload.role, 'white')
+                content = str(payload.content)
+                if len(content) > 200:
+                    content = content[:197] + '...'
+                if hidden:
+                    console.print(f'[dim]{payload.role}> {content}[/]')
+                else:
+                    console.print(f'[bold {role_style}]{payload.role}>[/] {content}')
+                continue
             continue
         wf_id = (event.workflow_id or '-')[:8]
         cat_style = _category_style(event.category)
@@ -291,7 +376,9 @@ def _format_payload(payload):
         parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else '-'
         return f'{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}'
     if isinstance(payload, ev.ConvAppendRequest):
-        content = payload.content[:60] + ('...' if len(payload.content) > 60 else '')
+        content = str(payload.content)
+        if len(content) > 60:
+            content = content[:57] + '...'
         return f'{payload.role}: {content!r}'
     if isinstance(payload, ev.ConvAppendResult):
         return f'msg={payload.message_id[:12]} layer={payload.layer}'
@@ -535,12 +622,27 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
     Handles Ctrl+C gracefully — state is always persisted."""
     last_event = 0
     interrupted = False
+
+    def _on_events(events):
+        nonlocal last_event
+        for e in events:
+            if e.event_id:
+                last_event = max(last_event, e.event_id)
+        _print_step_events(
+            [e for e in events if e.category == 'inbox'],
+            [e for e in events if e.category == 'outbox'],
+            trace=trace,
+        )
+
+    engine.config.on_events = _on_events
+
     try:
         for _ in range(max_steps):
             state, _ = store.load_state(execution_id)
             if state.finished:
                 break
 
+            # Print any events we missed (from previous steps)
             all_new = store.read_all_events(execution_id, after_event_id=last_event)
             if all_new:
                 last_event = all_new[-1].event_id

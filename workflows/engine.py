@@ -30,6 +30,7 @@ class EngineConfig:
     workflows_registry: dict = _field(default_factory=dict)
     workflow_event_handlers: dict = _field(default_factory=lambda: dict(HANDLER_REGISTRY))
     event_handlers: list = _field(default_factory=lambda: list(DEFAULT_EVENT_HANDLERS))
+    on_events: object = None  # callback(events: list[Event]) called when events are appended
 
 
 class Engine:
@@ -83,22 +84,52 @@ class Engine:
     def step(self, store, execution_id, now=None):
         now = now if now is not None else time.time()
         self._tick_and_process(store, execution_id, now)
+        # Keep stepping while active streams exist
+        while self._has_active_streams(store, execution_id):
+            # Resolve stream handlers even without new DB events
+            state, last_processed = store.load_state(execution_id)
+            new_events = self._resolve_workflow_handlers(state, execution_id, now)
+            if new_events or any(
+                wf.status == 'running' for wf in state.workflows.values()
+            ):
+                store.save_state(execution_id, state, last_processed_event_id=last_processed)
+                self._emit_events(store, new_events)
+                self._tick_and_process(store, execution_id, now)
+            else:
+                # Queue empty, wait briefly for data
+                import time as _time
+                _time.sleep(0.01)
+            state, _ = store.load_state(execution_id)
+            if state.finished:
+                break
+
+    @staticmethod
+    def _has_active_streams(store, execution_id):
+        from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
+        state, _ = store.load_state(execution_id)
+        with _streams_lock:
+            return any(sid in _active_streams for sid in state.streams)
+
+    def _emit_events(self, store, new_events):
+        if new_events:
+            store.append_events([
+                (e.execution_id, e.workflow_id, e.category, e.payload)
+                for e in new_events
+            ])
+            if self.config.on_events:
+                self.config.on_events(new_events)
 
     def _tick_and_process(self, store, execution_id, now):
         state, last_processed = store.load_state(execution_id)
 
         new_events = self._handle_tick(state, execution_id, now, store)
 
-        self._resolve_workflow_handlers(state, now)
+        new_events.extend(self._resolve_workflow_handlers(state, execution_id, now))
         self._check_finished(state)
         self._prune_finished(state)
 
         store.save_state(execution_id, state, last_processed_event_id=last_processed)
-        if new_events:
-            store.append_events([
-                (e.execution_id, e.workflow_id, e.category, e.payload)
-                for e in new_events
-            ])
+        self._emit_events(store, new_events)
 
         while self._process_events(store, execution_id, now):
             pass
@@ -112,18 +143,13 @@ class Engine:
 
         new_events = self._dispatch_events(all_events, state, store)
 
-        self._resolve_workflow_handlers(state, now)
+        new_events.extend(self._resolve_workflow_handlers(state, execution_id, now))
         self._check_finished(state)
         self._prune_finished(state)
 
         last_event_id = all_events[-1].event_id
         store.save_state(execution_id, state, last_processed_event_id=last_event_id)
-
-        if new_events:
-            store.append_events([
-                (e.execution_id, e.workflow_id, e.category, e.payload)
-                for e in new_events
-            ])
+        self._emit_events(store, new_events)
 
         return True
 
@@ -148,7 +174,8 @@ class Engine:
                         )
         return new_events
 
-    def _resolve_workflow_handlers(self, state, now):
+    def _resolve_workflow_handlers(self, state, execution_id, now):
+        new_events = []
         for handler_wf_id in list(state.handlers):
             hs = state.handlers[handler_wf_id]
             handler_cls = self.config.workflow_event_handlers.get(hs.handler_type)
@@ -160,6 +187,14 @@ class Engine:
                 continue
             if handler_cls.resolve(hs.state, wf, now):
                 del state.handlers[handler_wf_id]
+            # Collect any events the handler wants to emit
+            for evt_payload in hs.state.pop('_emit_events', []):
+                new_events.append(Event(
+                    event_id=0, execution_id=execution_id,
+                    workflow_id=handler_wf_id, category='inbox',
+                    payload=evt_payload,
+                ))
+        return new_events
 
     def _check_finished(self, state):
         root = state.workflows.get(state.root_workflow_id)

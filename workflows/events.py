@@ -24,6 +24,7 @@ class ShellRequest:
     command: str
     isolation_type: str = 'host'  # 'host' | 'docker'
     isolation_config: dict | None = None  # docker: {"image": ..., "network": ...}
+    public_env: dict | None = None
 
 @dataclass
 class ShellResult:
@@ -31,6 +32,30 @@ class ShellResult:
     exit_code: int
     stdout: str
     stderr: str
+
+@dataclass
+class ShellStreamStartRequest:
+    stream_id: str
+    command: str
+    isolation_type: str = 'host'
+    isolation_config: dict | None = None
+    public_env: dict | None = None
+
+@dataclass
+class ShellStreamStartResult:
+    stream_id: str
+
+@dataclass
+class ShellStreamNextRequest:
+    stream_id: str
+
+@dataclass
+class ShellStreamLine:
+    stream_id: str
+    stdout: list = field(default_factory=list)
+    stderr: list = field(default_factory=list)
+    finished: bool = False
+    exit_code: int | None = None
 
 @dataclass
 class FileReadRequest:
@@ -175,6 +200,7 @@ def _to_snake(name: str) -> str:
 _ALL_PAYLOADS = [
     WorkflowYielded, WorkflowFinished,
     ShellRequest, ShellResult,
+    ShellStreamStartRequest, ShellStreamStartResult, ShellStreamNextRequest, ShellStreamLine,
     FileReadRequest, FileReadResult,
     FileWriteRequest, FileWriteResult,
     WaitStarted, SleepStarted,

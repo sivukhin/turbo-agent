@@ -376,6 +376,12 @@ def _format_payload(payload):
                 f"tokens={payload.usage.get('input_tokens', 0)}+{payload.usage.get('output_tokens', 0)}"
             )
         return ", ".join(parts)
+    if isinstance(payload, ev.UsageEvent):
+        return (
+            f"{payload.source} {payload.model} "
+            f"in={payload.input_tokens} out={payload.output_tokens} "
+            f"${payload.cost_usd:.4f}"
+        )
     return repr(payload)
 
 

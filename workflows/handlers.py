@@ -171,20 +171,8 @@ class StreamNextHandler:
         with _streams_lock:
             q = _active_streams.get(state.stream_id)
         if not q:
-            line = ShellStreamLine(stdout=[], stderr=[], finished=True, exit_code=-1)
-            wf.status = "running"
-            wf.send_val = line
-            state.emit_events.append(
-                ShellStreamLineEvent(
-                    stream_id=state.stream_id,
-                    stdout=[],
-                    stderr=[],
-                    finished=True,
-                    exit_code=-1,
-                    meta=state.meta,
-                )
-            )
-            return True
+            # Stream not in memory — wait for event handler to restart it
+            return False
 
         try:
             item = q.get_nowait()

@@ -241,7 +241,7 @@ def workflow(func):
 
     n_orig_args = len(orig_argnames)
 
-    def _make_gen(*args, checkpoint=None):
+    def _make_gen(*args, checkpoint=None, **kwargs):
         raw = types.FunctionType(
             new_code,
             {
@@ -255,7 +255,7 @@ def workflow(func):
             next(gen)
             return DurableGenerator(gen, workflow_name=func.__name__, args=args)
         return DurableGenerator(
-            raw(None, *args), workflow_name=func.__name__, args=args
+            raw(None, *args, **kwargs), workflow_name=func.__name__, args=args
         )
 
     @functools.wraps(func)
@@ -266,19 +266,20 @@ def workflow(func):
                 id=new_id(),
                 workflow_name=func.__name__,
                 args=list(args),
+                kwargs=kwargs,
                 storage=storage,
                 description=description,
             )
             ctx.new_children.append(handle)
             return handle
-        return _make_gen(*args)
+        return _make_gen(*args, **kwargs)
 
     def resume(data):
         cp = pickle.loads(data) if isinstance(data, bytes) else data
         return _make_gen(checkpoint=cp)
 
-    def create(*args):
-        return _make_gen(*args)
+    def create(*args, **kwargs):
+        return _make_gen(*args, **kwargs)
 
     wrapper.resume = resume
     wrapper.create = create

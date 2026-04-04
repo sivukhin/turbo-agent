@@ -44,6 +44,7 @@ class WorkflowHandle:
     id: str
     workflow_name: str
     args: list[object]
+    kwargs: dict[str, object] = field(default_factory=dict)
     storage: StorageConfig | None = None
     description: str = ""
 
@@ -55,6 +56,7 @@ class WorkflowHandle:
 class WorkflowState:
     name: str
     args: list[object]
+    kwargs: dict[str, object] = field(default_factory=dict)
     parent_workflow_id: str | None = None
     workdir: str | None = None
     branches: dict[str, str] | None = None

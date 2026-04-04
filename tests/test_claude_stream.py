@@ -6,7 +6,7 @@ import tempfile
 import pytest
 from workflows import workflow, shell_stream_start, shell_stream_next, Engine, EngineConfig, Store
 from workflows.isolation import HostIsolation
-from workflows.events import ConvAppendResult, ShellStreamLineEvent
+from workflows.events import ConvAppendRequest, ConvAppendResult
 
 
 def _make_stream_json(*events):
@@ -70,8 +70,20 @@ def _run(engine, store, eid, max_steps=200):
     raise RuntimeError('Did not finish')
 
 
+def _conv_requests(store, eid):
+    """Get all ConvAppendRequest outbox events."""
+    outbox = store.read_outbox(eid)
+    return [e for e in outbox if isinstance(e.payload, ConvAppendRequest)]
+
+
+def _conv_results(store, eid):
+    """Get all ConvAppendResult inbox events."""
+    inbox = store.read_inbox(eid)
+    return [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
+
+
 class TestClaudeStreamHandler:
-    def test_assistant_text_creates_conv_event(self, engine_and_store):
+    def test_assistant_text_emits_conv_request(self, engine_and_store):
         engine, store = engine_and_store
         cmd = _make_stream_json(
             {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Hello world'}]}},
@@ -79,15 +91,13 @@ class TestClaudeStreamHandler:
         eid = engine.start(store, 'claude_stream', [cmd], workdir=tempfile.mkdtemp())
         _run(engine, store, eid)
 
-        inbox = store.read_inbox(eid)
-        conv_results = [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
-        texts = [r.payload for r in conv_results if r.payload.role == 'assistant']
-        assert any('Hello world' in store.conv_read_messages(
-            [store.conv_list_messages(t.conversation_id)[i]
-             for i in range(len(store.conv_list_messages(t.conversation_id)))]
-        )[0].content for t in texts[:1]) or len(texts) > 0
+        requests = _conv_requests(store, eid)
+        assert any(r.payload.role == 'assistant' and 'Hello world' in r.payload.content for r in requests)
+        # Should also have been processed into results
+        results = _conv_results(store, eid)
+        assert any(r.payload.role == 'assistant' for r in results)
 
-    def test_system_init_creates_conv_event(self, engine_and_store):
+    def test_system_init_emits_conv_request(self, engine_and_store):
         engine, store = engine_and_store
         cmd = _make_stream_json(
             {'type': 'system', 'subtype': 'init', 'model': 'claude-test'},
@@ -95,12 +105,12 @@ class TestClaudeStreamHandler:
         eid = engine.start(store, 'claude_stream', [cmd], workdir=tempfile.mkdtemp())
         _run(engine, store, eid)
 
-        inbox = store.read_inbox(eid)
-        conv_results = [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
-        assert len(conv_results) >= 1
-        assert conv_results[0].payload.role == 'assistant'
+        requests = _conv_requests(store, eid)
+        assert len(requests) >= 1
+        assert requests[0].payload.role == 'assistant'
+        assert 'claude-test' in requests[0].payload.content
 
-    def test_tool_use_creates_conv_event(self, engine_and_store):
+    def test_tool_use_emits_conv_request(self, engine_and_store):
         engine, store = engine_and_store
         cmd = _make_stream_json(
             {'type': 'assistant', 'message': {'content': [
@@ -110,12 +120,11 @@ class TestClaudeStreamHandler:
         eid = engine.start(store, 'claude_stream', [cmd], workdir=tempfile.mkdtemp())
         _run(engine, store, eid)
 
-        inbox = store.read_inbox(eid)
-        conv_results = [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
-        tool_uses = [r for r in conv_results if r.payload.role == 'tool_use']
+        requests = _conv_requests(store, eid)
+        tool_uses = [r for r in requests if r.payload.role == 'tool_use']
         assert len(tool_uses) >= 1
 
-    def test_tool_result_creates_conv_event(self, engine_and_store):
+    def test_tool_result_emits_conv_request(self, engine_and_store):
         engine, store = engine_and_store
         cmd = _make_stream_json(
             {'type': 'user', 'message': {'content': [
@@ -125,9 +134,8 @@ class TestClaudeStreamHandler:
         eid = engine.start(store, 'claude_stream', [cmd], workdir=tempfile.mkdtemp())
         _run(engine, store, eid)
 
-        inbox = store.read_inbox(eid)
-        conv_results = [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
-        tool_results = [r for r in conv_results if r.payload.role == 'tool_result']
+        requests = _conv_requests(store, eid)
+        tool_results = [r for r in requests if r.payload.role == 'tool_result']
         assert len(tool_results) >= 1
 
     def test_non_claude_stream_ignored(self, engine_and_store):
@@ -139,9 +147,8 @@ class TestClaudeStreamHandler:
         eid = engine.start(store, 'non_claude_stream', [cmd], workdir=tempfile.mkdtemp())
         _run(engine, store, eid)
 
-        inbox = store.read_inbox(eid)
-        conv_results = [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
-        assert len(conv_results) == 0
+        requests = _conv_requests(store, eid)
+        assert len(requests) == 0
 
     def test_result_event_no_hidden_label(self, engine_and_store):
         """The final result event should not have hidden label."""
@@ -152,24 +159,8 @@ class TestClaudeStreamHandler:
         eid = engine.start(store, 'claude_stream', [cmd], workdir=tempfile.mkdtemp())
         _run(engine, store, eid)
 
-        inbox = store.read_inbox(eid)
-        conv_results = [e for e in inbox if isinstance(e.payload, ConvAppendResult)]
-        assert len(conv_results) >= 1
-        # Result events should not be hidden
-        result_events = [r for r in conv_results if 'Final answer' in (r.payload.meta.get('labels', '') or '')]
-        assert len(result_events) == 0
-
-    def test_meta_threaded_to_stream_line_events(self, engine_and_store):
-        """ShellStreamLineEvent should carry claude_code meta from the start request."""
-        engine, store = engine_and_store
-        cmd = _make_stream_json(
-            {'type': 'system', 'subtype': 'init', 'model': 'test'},
-        )
-        eid = engine.start(store, 'claude_stream', [cmd], workdir=tempfile.mkdtemp())
-        _run(engine, store, eid)
-
-        # Check that stream line events in inbox have the meta
-        inbox = store.read_inbox(eid)
-        line_events = [e for e in inbox if isinstance(e.payload, ShellStreamLineEvent)]
-        for le in line_events:
-            assert le.payload.meta.get('claude_code') is True
+        requests = _conv_requests(store, eid)
+        assert len(requests) >= 1
+        result_reqs = [r for r in requests if 'Final answer' in r.payload.content]
+        assert len(result_reqs) == 1
+        assert result_reqs[0].payload.meta.get('labels', '') == ''

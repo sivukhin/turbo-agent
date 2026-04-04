@@ -1,5 +1,7 @@
 """Op dataclasses and Event — shared by engine and operation handlers."""
 
+import shlex
+
 from workflows.isolation.base import Isolation, ShellResult
 from workflows.llm.base import LlmResult
 from workflows.models.operations import (  # noqa: F401
@@ -28,6 +30,12 @@ from workflows.models.state import (  # noqa: F401
 # ---- Yield functions ----
 
 
+def _to_command(command: str | list[str]) -> str:
+    if isinstance(command, list):
+        return shlex.join(command)
+    return command
+
+
 def wait(handle, meta=None) -> WaitOp:
     return WaitOp(deps=[handle.id], mode="wait", meta=meta or {})
 
@@ -45,10 +53,10 @@ def sleep(seconds: float, meta=None) -> SleepOp:
 
 
 def shell(
-    command: str, isolation: Isolation, public_env=None, private_env=None, meta=None
+    command: str | list[str], isolation: Isolation, public_env=None, private_env=None, meta=None
 ) -> ShellOp:
     return ShellOp(
-        command=command,
+        command=_to_command(command),
         isolation=isolation,
         public_env=public_env,
         private_env=private_env,
@@ -57,10 +65,10 @@ def shell(
 
 
 def shell_stream_start(
-    command: str, isolation: Isolation, public_env=None, private_env=None, meta=None
+    command: str | list[str], isolation: Isolation, public_env=None, private_env=None, meta=None
 ) -> ShellStreamStartOp:
     return ShellStreamStartOp(
-        command=command,
+        command=_to_command(command),
         isolation=isolation,
         public_env=public_env,
         private_env=private_env,

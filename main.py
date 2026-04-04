@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 from rich.console import Console
 from rich.table import Table
@@ -77,6 +78,13 @@ def cmd_start(args):
     console.print(f"  workflow: [bold]{wf_name}[/]({', '.join(args.args)})")
 
 
+def _has_active_streams(state):
+    """Check if any streams are active in-memory (non-durable)."""
+    from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
+    with _streams_lock:
+        return any(sid in _active_streams for sid in state.streams)
+
+
 def cmd_step(args):
     store = Store(DB_PATH)
     registry, state = _load_registry_for_execution(store, args.id)
@@ -86,28 +94,32 @@ def cmd_step(args):
         sys.exit(1)
 
     trace = getattr(args, "trace", False)
-    engine = Engine(
-        EngineConfig(
-            workflows_registry=registry,
-            on_events=lambda events: print_events(events, trace=trace),
-        )
-    )
+    engine = Engine(EngineConfig(
+        workflows_registry=registry,
+        on_events=lambda events: print_events(events, trace=trace),
+    ))
+
+    # Run until safe pause point: no active in-memory streams
     try:
-        engine.step(store, args.id)
-    except Exception as e:
-        store.close()
-        console.print(f"[red]error:[/] {e}", highlight=False)
-        sys.exit(1)
+        while True:
+            state, _ = store.load_state(args.id)
+            if state.finished:
+                break
+            progress = engine.step(store, args.id)
+            state, _ = store.load_state(args.id)
+            if state.finished:
+                break
+            if not _has_active_streams(state):
+                break
+            if not progress:
+                time.sleep(0.01)
+    except KeyboardInterrupt:
+        pass
 
     state, _ = store.load_state(args.id)
     if state.finished:
         root = state.workflows[state.root_workflow_id]
-        console.print(f"  [bold green]returned:[/] {root.result!r}")
-        store.close()
-        return
-
-    # Check for unanswered user prompts
-    _handle_user_prompts(store, args.id, engine)
+        console.print(f"\n  [bold green]returned:[/] {root.result!r}")
     store.close()
 
 
@@ -221,6 +233,27 @@ def _print_claude_stream_line(line):
             console.print(f"[bold green]claude done>[/] {str(result)[:500]}")
 
 
+def _format_conv_content(role, content):
+    """Format conversation content for CLI display."""
+    if role == 'tool_use':
+        try:
+            data = json.loads(content) if isinstance(content, str) else content
+            name = data.get('name', '?')
+            inp = data.get('input', {})
+            if isinstance(inp, dict) and 'command' in inp:
+                return f"{name}: {inp['command']}"
+            return f"{name}({json.dumps(inp, ensure_ascii=False)})"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if role == 'tool_result':
+        try:
+            data = json.loads(content) if isinstance(content, str) else content
+            return data.get('output', str(content))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return str(content)
+
+
 def print_events(events, trace=False):
     """Print events to the CLI console."""
     all_events = sorted(events, key=lambda e: e.event_id)
@@ -231,11 +264,7 @@ def print_events(events, trace=False):
                 console.print(f"[bold blue]Assistant>[/] {payload.text}")
                 continue
             if isinstance(payload, ev.ConvAppendRequest):
-                labels = (
-                    (payload.meta or {}).get("labels", "")
-                    if hasattr(payload, "meta")
-                    else ""
-                )
+                labels = (payload.meta or {}).get("labels", "")
                 hidden = "hidden" in labels.split(",")
                 role_style = {
                     "user": "green",
@@ -243,9 +272,7 @@ def print_events(events, trace=False):
                     "tool_use": "magenta",
                     "tool_result": "cyan",
                 }.get(payload.role, "white")
-                content = str(payload.content)
-                if len(content) > 200:
-                    content = content[:197] + "..."
+                content = _format_conv_content(payload.role, payload.content)
                 if hidden:
                     console.print(f"[dim]{payload.role}> {content}[/]")
                 else:
@@ -626,12 +653,12 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
     console.print(table)
 
 
-def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
+def _run_loop(store, engine, execution_id, trace=False):
     """Run an execution to completion, handling user prompts interactively.
     Handles Ctrl+C gracefully — state is always persisted."""
     interrupted = False
     try:
-        for _ in range(max_steps):
+        while True:
             state, _ = store.load_state(execution_id)
             if state.finished:
                 break
@@ -642,7 +669,8 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
             if state.finished:
                 break
 
-            engine.step(store, execution_id)
+            if not engine.step(store, execution_id):
+                time.sleep(0.01)
 
     except KeyboardInterrupt:
         interrupted = True
@@ -656,8 +684,6 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
     elif state.finished:
         root = state.workflows[state.root_workflow_id]
         console.print(f"\n  [bold green]returned:[/] {root.result!r}")
-    else:
-        console.print(f"\n  [yellow]Did not finish after {max_steps} steps[/]")
 
 
 def cmd_run(args):
@@ -846,6 +872,7 @@ def main():
 
     p_step = sub.add_parser("step", help="Advance all active workflows one tick")
     p_step.add_argument("id", help="Execution ID")
+    p_step.add_argument("--trace", action="store_true", help="Show all events")
 
     p_status = sub.add_parser("status", help="Show execution status")
     p_status.add_argument("id", help="Execution ID")

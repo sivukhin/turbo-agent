@@ -29,6 +29,31 @@ def stream_test():
             break
         yield f"stdout: {result.stdout}"
 
+@workflow
+def stream_test_2():
+    stream = yield shell_stream_start(
+        "echo 1; sleep 1; echo 2; sleep 1; echo 3",
+        isolation=HostIsolation(),
+        meta={"shell": "demo"},
+    )
+    while True:
+        result: ShellStreamLineEvent = yield shell_stream_next(stream)
+        if result.finished:
+            break
+        yield f"stdout: {result.stdout}"
+    
+    yield 'pause'
+    stream = yield shell_stream_start(
+        "echo 1; sleep 1; echo 2; sleep 1; echo 3",
+        isolation=HostIsolation(),
+        meta={"shell": "demo"},
+    )
+    while True:
+        result: ShellStreamLineEvent = yield shell_stream_next(stream)
+        if result.finished:
+            break
+        yield f"stdout: {result.stdout}"
+
 
 @workflow
 def shell_prompt():

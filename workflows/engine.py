@@ -97,9 +97,10 @@ class Engine:
         self._tick_and_process(store, execution_id, now)
         return execution_id
 
-    def step(self, store, execution_id, now=None):
+    def step(self, store, execution_id, now=None) -> bool:
+        """Run one tick. Returns True if progress was made, False if idle."""
         now = now if now is not None else time.time()
-        self._tick_and_process(store, execution_id, now)
+        return self._tick_and_process(store, execution_id, now)
 
     def _emit_events(self, store, new_events):
         if new_events:
@@ -112,7 +113,7 @@ class Engine:
             if self.config.on_events:
                 self.config.on_events(new_events)
 
-    def _tick_and_process(self, store, execution_id, now):
+    def _tick_and_process(self, store, execution_id, now) -> bool:
         state, last_processed = store.load_state(execution_id)
         handlers_before = set(state.handlers)
 
@@ -132,8 +133,11 @@ class Engine:
         store.save_state(execution_id, state, last_processed_event_id=last_processed)
         self._emit_events(store, new_events)
 
+        made_progress = bool(new_events)
         while self._process_events(store, execution_id, now):
-            pass
+            made_progress = True
+
+        return made_progress
 
     def _process_events(self, store, execution_id, now):
         """Process one batch of unprocessed events. Returns True if any were processed."""
@@ -275,7 +279,7 @@ class Engine:
             try:
                 if wf.checkpoint is None:
                     wf_func = self.config.workflows_registry[wf.name]
-                    g = wf_func.create(*wf.args)
+                    g = wf_func.create(*wf.args, **wf.kwargs)
                     val = next(g)
                 else:
                     wf_func = self.config.workflows_registry[wf.name]
@@ -352,6 +356,7 @@ class Engine:
         child_wf = WorkflowState(
             name=handle.workflow_name,
             args=list(handle.args),
+            kwargs=dict(handle.kwargs),
             parent_workflow_id=parent_workflow_id,
             description=getattr(handle, "description", ""),
         )

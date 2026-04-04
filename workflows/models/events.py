@@ -161,11 +161,6 @@ class UserPromptResult:
     meta: dict = field(default_factory=dict)
 
 
-@dataclass
-class AiResponseEvent:
-    text: str
-    meta: dict = field(default_factory=dict)
-
 
 @dataclass
 class ConvAppendRequest:

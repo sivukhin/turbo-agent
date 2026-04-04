@@ -70,11 +70,6 @@ class UserPromptOp:
     meta: dict = field(default_factory=dict)
 
 
-@dataclass
-class AiResponseOp:
-    text: str
-    meta: dict = field(default_factory=dict)
-
 
 @dataclass
 class AiOp:

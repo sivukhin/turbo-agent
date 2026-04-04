@@ -13,7 +13,6 @@ from workflows.models.operations import (  # noqa: F401
     ReadFileOp,
     WriteFileOp,
     UserPromptOp,
-    AiResponseOp,
     AiOp,
 )
 from workflows.models.state import (  # noqa: F401
@@ -93,9 +92,6 @@ def write_file(path: str, content: str, meta=None) -> WriteFileOp:
 def user_prompt(meta=None) -> UserPromptOp:
     return UserPromptOp(meta=meta or {})
 
-
-def ai_response(text: str, meta=None) -> AiResponseOp:
-    return AiResponseOp(text=text, meta=meta or {})
 
 
 def ai(

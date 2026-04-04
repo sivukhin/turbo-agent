@@ -16,7 +16,6 @@ from workflows import (
     shell_stream_start,
     shell_stream_next,
 )
-from workflows.ops import ai_response
 from workflows.isolation import HostIsolation, DockerIsolation
 
 TURSO_REPO = "tursodatabase/turso"
@@ -226,13 +225,11 @@ def review(pr_number):
     read = yield shell("cat REVIEW.md", isolation=HostIsolation())
     if read.exit_code == 0 and read.stdout.strip():
         yield conv_append(role="assistant", content=read.stdout)
-        yield ai_response(read.stdout)
         return "review complete"
 
     # Fallback: use the final text from Claude Code
     if final_text:
         yield conv_append(role="assistant", content=final_text)
-        yield ai_response(final_text)
         return "review complete"
 
     yield conv_append(role="assistant", content="Review produced no output.")

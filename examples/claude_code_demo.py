@@ -19,7 +19,6 @@ from workflows import (
     shell_stream_start,
     shell_stream_next,
 )
-from workflows.ops import ai_response
 from workflows.isolation import DockerIsolation
 
 
@@ -76,9 +75,6 @@ def ask_claude(prompt):
         public_env={'IS_SANDBOX': '1'},
     )
     result = yield wait(handle)
-
-    if result:
-        yield ai_response(result)
     return result or 'no output'
 
 
@@ -101,7 +97,4 @@ def math_challenge():
         public_env={'IS_SANDBOX': '1'},
     )
     result = yield wait(handle)
-
-    if result:
-        yield ai_response(result)
     return result or 'no output'

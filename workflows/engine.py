@@ -1,3 +1,4 @@
+import copy
 import pickle
 import time
 from collections.abc import Callable
@@ -20,6 +21,14 @@ from workflows.ops import (
 from workflows.operations import DEFAULT_OP_HANDLERS
 from workflows.operations.base import OpContext
 import workflows.events as ev
+
+
+def _strip_secrets(val):
+    """Remove private_env from an op before persisting."""
+    if hasattr(val, 'private_env') and val.private_env:
+        val = copy.copy(val)
+        val.private_env = None
+    return val
 
 
 from dataclasses import dataclass as _dataclass, field as _field
@@ -330,7 +339,7 @@ class Engine:
                     workflow_id=workflow_id,
                     category="outbox",
                     payload=ev.WorkflowYielded(
-                        value=val, meta=getattr(val, "meta", {})
+                        value=_strip_secrets(val), meta=getattr(val, "meta", {})
                     ),
                 )
             )

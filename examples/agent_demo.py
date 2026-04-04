@@ -4,7 +4,7 @@ Run with: uv run main.py run examples/agent_demo.py:chat
 """
 
 from workflows import workflow, conv_append, Latest, shell, conv_list
-from workflows.ops import ai, user_prompt, ai_response
+from workflows.ops import ai, user_prompt
 from workflows.isolation import DockerIsolation
 
 
@@ -93,7 +93,7 @@ def chat():
                     content=response.text,
                     meta={"model": response.model},
                 )
-                yield ai_response(response.text)
+                yield conv_append(role='assistant', content=response.text)
                 break
 
     return "Goodbye!"

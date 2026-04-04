@@ -10,7 +10,7 @@ from workflows.operations.shell_stream_op import (
 )
 from workflows.operations.file_ops import handle_read_file, handle_write_file
 from workflows.operations.llm_op import handle_ai
-from workflows.operations.user_prompt_op import handle_user_prompt, handle_ai_response
+from workflows.operations.user_prompt_op import handle_user_prompt
 from workflows.operations.conv_ops import (
     handle_conv_append,
     handle_conv_list,
@@ -26,7 +26,6 @@ DEFAULT_OP_HANDLERS = [
     handle_write_file,
     handle_ai,
     handle_user_prompt,
-    handle_ai_response,
     handle_wait,
     handle_sleep,
     handle_conv_append,

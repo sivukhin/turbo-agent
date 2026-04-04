@@ -19,6 +19,14 @@ TASKS_DB_PATH = os.path.join(os.path.dirname(__file__), "tasks.db")
 console = Console()
 
 
+def _parse_cli_arg(a):
+    """Parse a CLI argument: try JSON first, fall back to plain string."""
+    try:
+        return json.loads(a)
+    except json.JSONDecodeError:
+        return a
+
+
 def _parse_target(target: str) -> tuple[str, str]:
     """Parse 'file.py:function' into (file_path, function_name)."""
     if ":" not in target:
@@ -59,7 +67,7 @@ def cmd_start(args):
         console.print(f"Available in {file_path}: {', '.join(registry)}")
         sys.exit(1)
 
-    parsed_args = [json.loads(a) for a in args.args]
+    parsed_args = [_parse_cli_arg(a) for a in args.args]
     store = Store(DB_PATH)
     engine = Engine(
         EngineConfig(
@@ -158,81 +166,6 @@ def _handle_user_prompts(store, execution_id, engine):
         engine.step(store, execution_id)
 
 
-def _print_claude_stream_line(line):
-    """Parse a Claude Code stream-json line and print it readably."""
-    if not line.strip():
-        return
-    try:
-        event = json.loads(line)
-    except json.JSONDecodeError:
-        console.print(f"[dim]{line[:200]}[/]")
-        return
-
-    etype = event.get("type")
-    subtype = event.get("subtype", "")
-
-    if etype == "system":
-        if subtype == "init":
-            console.print(
-                f"[dim]claude: session started (model={event.get('model', '?')})[/]"
-            )
-        elif subtype == "task_started":
-            console.print(f"[dim]claude: agent> {event.get('description', '')}[/]")
-        elif subtype == "task_progress":
-            desc = event.get("description", "")
-            usage = event.get("usage", {})
-            console.print(
-                f"[dim]claude: {desc} (tokens={usage.get('total_tokens', 0)})[/]"
-            )
-
-    elif etype == "assistant":
-        msg = event.get("message", {})
-        for block in msg.get("content", []):
-            btype = block.get("type")
-            if btype == "text":
-                text = block.get("text", "")
-                if text.strip():
-                    console.print(
-                        f"[blue]claude>[/] {text[:300]}{'...' if len(text) > 300 else ''}"
-                    )
-            elif btype == "tool_use":
-                name = block.get("name", "?")
-                inp = block.get("input", {})
-                inp_str = str(inp)
-                if len(inp_str) > 150:
-                    inp_str = inp_str[:147] + "..."
-                console.print(f"[magenta]claude tool>[/] {name}({inp_str})")
-            elif btype == "thinking":
-                thinking = block.get("thinking", "")
-                if thinking.strip():
-                    console.print(
-                        f"[dim italic]claude thinking> {thinking[:200]}{'...' if len(thinking) > 200 else ''}[/]"
-                    )
-
-    elif etype == "user":
-        msg = event.get("message", {})
-        for block in msg.get("content", []):
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                content = block.get("content", "")
-                is_error = block.get("is_error", False)
-                if isinstance(content, list):
-                    content = "\n".join(
-                        b.get("text", "") for b in content if isinstance(b, dict)
-                    )
-                content = str(content)
-                if len(content) > 300:
-                    content = content[:297] + "..."
-                if is_error:
-                    console.print(f"[red]claude result>[/] {content}")
-                else:
-                    console.print(f"[cyan]claude result>[/] {content}")
-
-    elif etype == "result":
-        result = event.get("result", "")
-        if result:
-            console.print(f"[bold green]claude done>[/] {str(result)[:500]}")
-
-
 def _format_conv_content(role, content):
     """Format conversation content for CLI display."""
     if role == 'tool_use':
@@ -260,9 +193,6 @@ def print_events(events, trace=False):
     for event in all_events:
         payload = event.payload
         if not trace:
-            if isinstance(payload, ev.AiResponseEvent):
-                console.print(f"[bold blue]Assistant>[/] {payload.text}")
-                continue
             if isinstance(payload, ev.ConvAppendRequest):
                 labels = (payload.meta or {}).get("labels", "")
                 hidden = "hidden" in labels.split(",")
@@ -399,9 +329,6 @@ def _format_payload(payload):
         return f"[{payload.request_id[:8]}] waiting for input"
     if isinstance(payload, ev.UserPromptResult):
         return f"[{payload.request_id[:8]}] {payload.response!r}"
-    if isinstance(payload, ev.AiResponseEvent):
-        text = payload.text[:80] + ("..." if len(payload.text) > 80 else "")
-        return text
     if isinstance(payload, ev.WorkflowSpawned):
         parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else "-"
         return f"{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}"
@@ -622,9 +549,8 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
 
     for i, msg in enumerate(messages):
         labels = msg.ref.meta.get("labels", "")
-        if "hidden" in labels.split(","):
-            continue
-        style = role_style.get(msg.role, "white")
+        hidden = "hidden" in labels.split(",")
+        style = "dim" if hidden else role_style.get(msg.role, "white")
         content = msg.content
         if msg.role == "tool_use":
             try:
@@ -643,10 +569,13 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
         from_parent = msg.ref.conversation_id != conversation_id
         parent_tag = " [dim](parent)[/]" if from_parent else ""
         label_tag = f" [dim][{labels}][/]" if labels else ""
+        row_content = content + parent_tag + label_tag
+        if hidden:
+            row_content = f"[dim]{row_content}[/]"
         table.add_row(
             str(i),
             Text(msg.role, style=style),
-            content + parent_tag + label_tag,
+            row_content,
             msg.ref.message_id[:10],
         )
 
@@ -695,7 +624,7 @@ def cmd_run(args):
         console.print(f"Available in {file_path}: {', '.join(registry)}")
         sys.exit(1)
 
-    parsed_args = [json.loads(a) for a in args.args]
+    parsed_args = [_parse_cli_arg(a) for a in args.args]
     trace = getattr(args, "trace", False)
     store = Store(DB_PATH)
     engine = Engine(

@@ -13,14 +13,8 @@ Updating task name/description updates these messages in place.
 
 import json
 import os
-import time
-import uuid
 import turso
-
-
-def _uuid():
-    ts = int(time.time() * 1000)
-    return f'{ts:012x}{uuid.uuid4().hex[:4]}'
+from workflows.ids import new_id
 
 
 def task_db_path(tasks_dir: str, task_id: str) -> str:
@@ -72,13 +66,13 @@ class TaskStore:
 
     def create(self, name, description='', status='pending', labels=None,
                color='') -> dict:
-        task_id = _uuid()
+        task_id = new_id()
         labels = labels or {}
         now = time.time()
 
         # Create context conversation in the task's execution DB
         store = self._get_task_store(task_id)
-        conv_id = _uuid()
+        conv_id = new_id()
         store.create_conversation(conv_id)
         title_ref = store.conv_append_message(conv_id, 'user', f'Task: {name}')
         desc_ref = store.conv_append_message(conv_id, 'user', description or '(no description)')

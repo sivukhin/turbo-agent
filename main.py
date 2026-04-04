@@ -396,13 +396,11 @@ def _format_payload(payload):
         return f'layer={payload.new_layer} {len(payload.new_message_refs)} msgs'
     if isinstance(payload, ev.LlmRequest):
         if payload.conversation_ref:
-            n_msgs = payload.message_count or '?'
-            src = f'conv={payload.conversation_ref["conversation_id"][:8]}'
+            src = f'conv={payload.conversation_ref.conversation_id[:8]}'
         else:
-            n_msgs = len(payload.messages) if payload.messages else 0
-            src = 'messages'
+            src = f'{len(payload.messages)} msgs' if payload.messages else '0 msgs'
         tools = f', {len(payload.tools)} tools' if payload.tools else ''
-        return f'{payload.model} ({src}, {n_msgs} msgs{tools}, T={payload.temperature})'
+        return f'{payload.model} ({src}{tools}, T={payload.temperature})'
     if isinstance(payload, ev.LlmResponse):
         texts = [b['text'][:60] for b in payload.content if b.get('type') == 'text']
         tool_calls = [b['name'] for b in payload.content if b.get('type') == 'tool_use']

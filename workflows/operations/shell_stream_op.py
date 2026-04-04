@@ -1,4 +1,4 @@
-import uuid
+from workflows.ids import new_id
 from workflows.operations.base import OpContext, op_handler
 from workflows.operations.shell_op import _serialize_isolation, _private_envs
 from workflows.ops import ShellStreamStartOp, ShellStreamNextOp, StreamDef, Event
@@ -18,7 +18,7 @@ class ShellStreamStartOpHandler:
         if val.isolation is None:
             raise RuntimeError('ShellStreamStartOp requires an isolation instance')
         iso_type, iso_config = _serialize_isolation(val.isolation)
-        stream_id = uuid.uuid4().hex[:12]
+        stream_id = new_id()
 
         # Persist stream definition (public env only)
         ctx.state.streams[stream_id] = StreamDef(

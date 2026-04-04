@@ -17,7 +17,7 @@ _streams_lock = threading.Lock()
 
 def _build_cmd(iso_type, iso_config, workdir, command, env):
     if iso_type == 'docker':
-        iso = DockerIsolation(**(iso_config or {}))
+        iso = iso_config or DockerIsolation()
         cmd = [
             'docker', 'run', '--rm',
             f'--network={iso.network}',

@@ -15,7 +15,9 @@ class SleepOpHandler:
             state=handler_cls.initial_state(wake_at),
         )
         ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
+            event_id=0, 
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id, 
+            category='outbox',
             payload=ev.SleepStarted(seconds=val.seconds, wake_at=wake_at),
         ))

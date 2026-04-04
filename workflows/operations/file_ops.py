@@ -11,8 +11,10 @@ class ReadFileOpHandler:
             raise RuntimeError(f'Workflow {ctx.workflow_id} has no workdir configured')
         ctx.wf.status = 'waiting'
         ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
+            event_id=0, 
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id, 
+            category='outbox',
             payload=ev.FileReadRequest(path=val.path),
         ))
 
@@ -25,7 +27,9 @@ class WriteFileOpHandler:
             raise RuntimeError(f'Workflow {ctx.workflow_id} has no workdir configured')
         ctx.wf.status = 'waiting'
         ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
+            event_id=0, 
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id, 
+            category='outbox',
             payload=ev.FileWriteRequest(path=val.path, content=val.content),
         ))

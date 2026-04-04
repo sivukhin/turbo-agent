@@ -1,12 +1,10 @@
 import json
 import pickle
-import uuid
 import turso
+from workflows.ids import new_id
 from workflows.ops import ExecutionState, Event
 from workflows.events import serialize_payload, deserialize_payload, payload_type_name
-from workflows.conversation import (
-    MessageRef, ConversationRef, Message, _sortable_uuid,
-)
+from workflows.conversation import MessageRef, ConversationRef, Message
 
 
 class Store:
@@ -199,7 +197,7 @@ class Store:
         import time as _time
         if not isinstance(content, str):
             content = json.dumps(content)
-        message_id = _sortable_uuid()
+        message_id = new_id()
         meta = meta or {}
         cur = self.conn.cursor()
         cur.execute(
@@ -349,15 +347,11 @@ class Store:
                 (conversation_id, msg_id, new_layer),
             )
 
-        base_id = existing[0][0] if existing else (start_message_id or _sortable_uuid())
-        parts = base_id.split('-', 2)
-        base_ts = parts[0]
-        base_seq = int(parts[1], 16) if len(parts) > 1 else 0
+        # Use start_message_id as base so replacements sort in the right position
+        base_id = start_message_id or (existing[0][0] if existing else new_id())
         new_refs = []
         for i, msg in enumerate(new_messages):
-            seq = base_seq + i
-            rand = uuid.uuid4().hex[:8]
-            msg_id = f'{base_ts}-{seq:08x}-{rand}'
+            msg_id = f'{base_id}_r{i}'
             meta = msg.get('meta', {})
             cur.execute(
                 """INSERT INTO conversations

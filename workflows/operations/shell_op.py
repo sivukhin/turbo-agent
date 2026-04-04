@@ -11,7 +11,7 @@ _private_envs: dict[str, dict] = {}
 
 def _serialize_isolation(isolation):
     if isinstance(isolation, DockerIsolation):
-        return 'docker', {'image': isolation.image, 'network': isolation.network}
+        return 'docker', isolation
     return 'host', None
 
 
@@ -28,8 +28,10 @@ class ShellOpHandler:
             _private_envs[ctx.workflow_id] = val.private_env
         ctx.wf.status = 'waiting'
         ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
+            event_id=0, 
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id, 
+            category='outbox',
             payload=ev.ShellRequest(
                 command=val.command,
                 isolation_type=iso_type,

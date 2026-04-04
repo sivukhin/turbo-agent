@@ -1,23 +1,16 @@
 import pickle
 import time
-import uuid
 from pathlib import Path
 from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
+from workflows.ids import new_id
 from workflows.isolation.base import StorageConfig, setup_child_workspace, scan_git_branches
-from workflows.conversation import _sortable_uuid
 from workflows.ops import (
     Event, WorkflowHandle, WorkflowState, HandlerState, ExecutionState,
 )
 from workflows.operations import DEFAULT_OP_HANDLERS
 from workflows.operations.base import OpContext
 import workflows.events as ev
-
-
-def _uuid():
-    """Time-sortable UUID: timestamp prefix + random suffix."""
-    ts = int(time.time() * 1000)
-    return f'{ts:012x}{uuid.uuid4().hex[:4]}'
 
 
 from dataclasses import dataclass as _dataclass, field as _field
@@ -50,8 +43,8 @@ class Engine:
     def start(self, store, workflow_name, args, now=None, source_file=None,
               workdir=None, parent_conversation_id=None) -> str:
         now = now if now is not None else time.time()
-        execution_id = _uuid()
-        root_workflow_id = _uuid()
+        execution_id = new_id()
+        root_workflow_id = new_id()
 
         wf_state = WorkflowState(name=workflow_name, args=list(args))
         if workdir:
@@ -60,7 +53,7 @@ class Engine:
             wf_state.workdir = str(wf_dir)
             wf_state.branches = scan_git_branches(wf_dir)
 
-        conv_id = _uuid()
+        conv_id = new_id()
         wf_state.conversation_id = conv_id
         if parent_conversation_id:
             parent_ref = store.conv_resolve_ref(parent_conversation_id)
@@ -298,7 +291,7 @@ class Engine:
             child_wf.branches = child_branches
 
         if store and parent_wf and parent_wf.conversation_id:
-            child_conv_id = _uuid()
+            child_conv_id = new_id()
             parent_ref = store.conv_resolve_ref(parent_wf.conversation_id)
             store.create_conversation(
                 child_conv_id,

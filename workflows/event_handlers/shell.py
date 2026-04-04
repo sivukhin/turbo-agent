@@ -8,7 +8,7 @@ import workflows.events as ev
 
 def _make_isolation(iso_type, iso_config):
     if iso_type == 'docker':
-        return DockerIsolation(**(iso_config or {}))
+        return iso_config or DockerIsolation()
     return HostIsolation()
 
 

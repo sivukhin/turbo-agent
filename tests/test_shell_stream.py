@@ -123,7 +123,7 @@ class TestShellStream:
         assert len(state.streams) == 1
         stream_id = list(state.streams.keys())[0]
         assert isinstance(stream_id, str)
-        assert len(stream_id) == 12
+        assert len(stream_id) == 20
 
     def test_finished_includes_final_lines(self, engine_and_store):
         """The finished=True line should include any remaining stderr."""

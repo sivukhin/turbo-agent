@@ -2,7 +2,7 @@ import pickle
 import types
 import functools
 import contextvars
-import uuid
+from workflows.ids import new_id
 from bytecode import (
     Bytecode, Instr, Label, ControlFlowGraph,
     TryBegin, TryEnd, Compare, BinaryOp,
@@ -243,7 +243,7 @@ def workflow(func):
         ctx = _current_ctx.get()
         if ctx is not None:
             handle = WorkflowHandle(
-                id=uuid.uuid4().hex[:12],
+                id=new_id(),
                 workflow_name=func.__name__,
                 args=list(args),
                 storage=storage,

@@ -9,48 +9,11 @@ Two read operations:
   - read_messages: accepts [MessageRef], returns [Message] — refs with content
 """
 
-import uuid
-import time
-from dataclasses import dataclass, field
-
-
-_seq_counter = 0
-
-def _sortable_uuid():
-    global _seq_counter
-    _seq_counter += 1
-    ts = int(time.time() * 1_000_000)
-    return f'{ts:016x}-{_seq_counter:08x}-{uuid.uuid4().hex[:8]}'
-
-
-@dataclass
-class ConversationRef:
-    """Reference to a conversation at a specific point."""
-    conversation_id: str
-    message_id: str | None = None   # None = latest
-    layer: int | None = None        # None = latest
-
-
-@dataclass
-class MessageRef:
-    """Reference to a specific message, includes role as metadata."""
-    conversation_id: str
-    message_id: str
-    layer: int
-    role: str
-    meta: dict = field(default_factory=dict)  # arbitrary JSON metadata; well-known key: "labels" (comma-separated)
-    event_time: int = 0  # event_id at creation time — logical clock for correlating with events
-
-
-@dataclass
-class Message:
-    """A message with content, returned by read_messages."""
-    ref: MessageRef
-    content: str
-
-    @property
-    def role(self):
-        return self.ref.role
+from workflows.ids import new_id  # noqa: F401
+from workflows.models.conversation import ConversationRef, MessageRef, Message  # noqa: F401
+from workflows.models.operations import (  # noqa: F401
+    ConvAppendOp, ConvListOp, ConvReadOp, ConvReplaceWithOp,
+)
 
 
 # Sentinel: resolves to the workflow's current conversation
@@ -66,38 +29,6 @@ class _LatestType:
         return (_LatestType, ())
 
 Latest = _LatestType()
-
-
-# ---- Operations (yielded by workflows) ----
-
-@dataclass
-class ConvAppendOp:
-    role: str
-    content: object
-    meta: dict = field(default_factory=dict)
-
-
-@dataclass
-class ConvListOp:
-    """List message refs in range. Returns [MessageRef]."""
-    conversation: object = None  # ConversationRef or None (= workflow's current)
-    start_message_id: str | None = None
-    end_message_id: str | None = None
-    role_filter: str | None = None
-    pattern: str | None = None  # LIKE pattern on content
-
-
-@dataclass
-class ConvReadOp:
-    """Read messages by refs. Returns [Message]."""
-    refs: list  # [MessageRef]
-
-
-@dataclass
-class ConvReplaceWithOp:
-    new_messages: list  # [{"role": str, "content": str}]
-    start_ref: MessageRef | None = None
-    end_ref: MessageRef | None = None
 
 
 # ---- Yield functions ----

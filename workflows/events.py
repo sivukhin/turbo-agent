@@ -5,199 +5,12 @@ discriminator so payloads can be reconstructed from storage.
 """
 
 import json
-import re
-from dataclasses import dataclass, field, fields, asdict
+import types
+from dataclasses import fields, asdict, is_dataclass
 
+from workflows.models.state import _to_snake
 
-# ---- payload types ----
-
-@dataclass
-class WorkflowYielded:
-    value: object
-
-@dataclass
-class WorkflowFinished:
-    result: object
-
-@dataclass
-class ShellRequest:
-    command: str
-    isolation_type: str = 'host'  # 'host' | 'docker'
-    isolation_config: dict | None = None  # docker: {"image": ..., "network": ...}
-    public_env: dict | None = None
-
-@dataclass
-class ShellResult:
-    command: str
-    exit_code: int
-    stdout: str
-    stderr: str
-
-@dataclass
-class ShellStreamStartRequest:
-    stream_id: str
-    command: str
-    isolation_type: str = 'host'
-    isolation_config: dict | None = None
-    public_env: dict | None = None
-
-@dataclass
-class ShellStreamStartResult:
-    stream_id: str
-
-@dataclass
-class ShellStreamNextRequest:
-    stream_id: str
-
-@dataclass
-class ShellStreamLine:
-    stream_id: str
-    stdout: list = field(default_factory=list)
-    stderr: list = field(default_factory=list)
-    finished: bool = False
-    exit_code: int | None = None
-
-@dataclass
-class FileReadRequest:
-    path: str
-
-@dataclass
-class FileReadResult:
-    path: str
-    content: str
-
-@dataclass
-class FileWriteRequest:
-    path: str
-    content: str
-
-@dataclass
-class FileWriteResult:
-    path: str
-    size: int
-
-@dataclass
-class WaitStarted:
-    mode: str           # 'wait' | 'wait_all' | 'wait_any'
-    deps: list[str]
-
-@dataclass
-class SleepStarted:
-    seconds: float
-    wake_at: float
-
-@dataclass
-class WorkflowSpawned:
-    child_workflow_id: str
-    name: str
-    args: list
-    parent_workflow_id: str | None
-    storage_mode: str   # 'same' | 'copy-full' | 'copy-git' | 'branch'
-
-@dataclass
-class LlmRequest:
-    """Request to an LLM. Provider-agnostic.
-    Either conversation_ref (lightweight) or messages (full) is set, not both."""
-    model: str = 'anthropic/claude-sonnet-4-20250514'
-    max_tokens: int | None = None
-    temperature: float = 0.0
-    system: str | None = None
-    tools: list | None = None
-    conversation_ref: dict | None = None  # {"conversation_id", "message_id", "layer"} if from conversation
-    message_count: int | None = None      # number of messages (when using conversation_ref)
-    messages: list | None = None          # full messages (only when no conversation)
-
-@dataclass
-class LlmResponse:
-    """Response from an LLM."""
-    content: list               # [{"type": "text", "text": str} | {"type": "tool_use", "id": str, "name": str, "input": dict}]
-    model: str
-    stop_reason: str | None     # "end_turn"|"tool_use"|"max_tokens"|"stop_sequence"
-    usage: dict | None          # {"input_tokens": int, "output_tokens": int}
-    text: str = ''              # concatenated text from text blocks
-    tool_calls: list | None = None  # [{"id": str, "name": str, "input": dict}] parsed tool calls
-    message_id: str | None = None
-
-
-# ---- User prompt events ----
-
-@dataclass
-class UserPromptRequest:
-    request_id: str
-
-@dataclass
-class UserPromptResult:
-    request_id: str
-    response: str
-
-@dataclass
-class AiResponseEvent:
-    text: str
-
-
-# ---- Conversation events ----
-
-@dataclass
-class ConvAppendRequest:
-    conversation_id: str
-    role: str
-    content: str
-    meta: dict = field(default_factory=dict)
-
-@dataclass
-class ConvAppendResult:
-    conversation_id: str
-    message_id: str
-    layer: int
-    role: str
-    meta: dict = field(default_factory=dict)
-
-@dataclass
-class ConvListRequest:
-    conversation_id: str
-    end_message_id: str | None = None
-    layer: int | None = None
-    start_message_id: str | None = None
-    role_filter: str | None = None
-    pattern: str | None = None
-
-@dataclass
-class ConvListResult:
-    count: int
-    message_refs: list  # [{"conversation_id", "message_id", "layer", "role"}]
-
-@dataclass
-class ConvReadRequest:
-    message_refs: list  # [{"conversation_id", "message_id", "layer", "role"}]
-
-@dataclass
-class ConvReadResult:
-    count: int
-
-@dataclass
-class ConvReplaceWithRequest:
-    conversation_id: str
-    new_messages: list
-    start_message_id: str | None
-    end_message_id: str | None
-
-@dataclass
-class ConvReplaceWithResult:
-    conversation_id: str
-    new_layer: int
-    new_message_refs: list
-
-
-# ---- registry ----
-
-def _to_snake(name: str) -> str:
-    """Convert CamelCase to snake_case."""
-    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
-    s = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', s)
-    return s.lower()
-
-
-_ALL_PAYLOADS = [
+from workflows.models.events import (  # noqa: F401
     WorkflowYielded, WorkflowFinished,
     ShellRequest, ShellResult,
     ShellStreamStartRequest, ShellStreamStartResult, ShellStreamNextRequest, ShellStreamLine,
@@ -211,6 +24,41 @@ _ALL_PAYLOADS = [
     ConvListRequest, ConvListResult,
     ConvReadRequest, ConvReadResult,
     ConvReplaceWithRequest, ConvReplaceWithResult,
+)
+
+
+# ---- registry ----
+
+
+_ALL_PAYLOADS = [
+    WorkflowYielded,
+    WorkflowFinished,
+    ShellRequest,
+    ShellResult,
+    ShellStreamStartRequest,
+    ShellStreamStartResult,
+    ShellStreamNextRequest,
+    ShellStreamLine,
+    FileReadRequest,
+    FileReadResult,
+    FileWriteRequest,
+    FileWriteResult,
+    WaitStarted,
+    SleepStarted,
+    WorkflowSpawned,
+    LlmRequest,
+    LlmResponse,
+    UserPromptRequest,
+    UserPromptResult,
+    AiResponseEvent,
+    ConvAppendRequest,
+    ConvAppendResult,
+    ConvListRequest,
+    ConvListResult,
+    ConvReadRequest,
+    ConvReadResult,
+    ConvReplaceWithRequest,
+    ConvReplaceWithResult,
 ]
 
 PAYLOAD_REGISTRY: dict[str, type] = {
@@ -232,6 +80,27 @@ def serialize_payload(payload) -> str:
     return json.dumps(data, default=str)
 
 
+def _unwrap_optional(tp):
+    """Unwrap X | None to X."""
+    if isinstance(tp, types.UnionType):
+        args = [a for a in tp.__args__ if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return tp
+
+
+def _reconstruct(tp, val):
+    """Reconstruct a value from JSON-deserialized data using type hints."""
+    tp = _unwrap_optional(tp)
+    if isinstance(val, dict) and is_dataclass(tp):
+        return tp(**val)
+    if isinstance(val, list) and hasattr(tp, '__args__'):
+        item_tp = tp.__args__[0] if tp.__args__ else None
+        if item_tp and is_dataclass(item_tp):
+            return [item_tp(**v) if isinstance(v, dict) else v for v in val]
+    return val
+
+
 def deserialize_payload(json_str: str):
     """Deserialize JSON with _type discriminator back to a payload dataclass."""
     data = json.loads(json_str)
@@ -239,7 +108,9 @@ def deserialize_payload(json_str: str):
     cls = PAYLOAD_REGISTRY.get(type_name)
     if cls is None:
         raise ValueError(f'Unknown payload type: {type_name}')
-    # Only pass fields the dataclass expects
-    valid_fields = {f.name for f in fields(cls)}
-    filtered = {k: v for k, v in data.items() if k in valid_fields}
+    filtered = {}
+    for f in fields(cls):
+        if f.name not in data:
+            continue
+        filtered[f.name] = _reconstruct(f.type, data[f.name])
     return cls(**filtered)

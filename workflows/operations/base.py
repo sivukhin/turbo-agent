@@ -1,20 +1,7 @@
 """Base operation handler interface."""
 
-from dataclasses import dataclass
 from typing import Protocol
-
-
-@dataclass
-class OpContext:
-    """Context passed to operation handlers."""
-    execution_id: str
-    workflow_id: str
-    wf: object          # WorkflowState
-    state: object       # ExecutionState
-    store: object       # Store (may be None)
-    new_events: list    # list of Event — handlers append to this
-    now: float
-    workflow_event_handlers: dict = None  # {name: WorkflowEventHandler}
+from workflows.models.context import OpContext  # noqa: F401
 
 
 class OpHandler(Protocol):
@@ -36,5 +23,3 @@ def op_handler(op_type):
         cls._op_type = op_type
         return cls
     return decorator
-
-

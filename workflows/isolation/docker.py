@@ -26,6 +26,8 @@ class DockerIsolation:
             f"{workdir.resolve()}:/workspace",
             "-w",
             "/workspace",
+            "-e",
+            "HOME=/workspace",
         ]
         for k, v in (env or {}).items():
             cmd.extend(["-e", f"{k}={v}"])

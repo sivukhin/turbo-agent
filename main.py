@@ -434,8 +434,10 @@ def cmd_inspect(args):
         handler = state.handlers.get(wf_id)
         if handler:
             h_node = wf_node.add(f"[dim]handler:[/] [yellow]{handler.handler_type}[/]")
-            for k, v in sorted(handler.state.items()):
-                h_node.add(f"[bold]{k}[/] = {v!r}")
+            fields = vars(handler.state) if hasattr(handler.state, '__dict__') else handler.state
+            if isinstance(fields, dict):
+                for k, v in sorted(fields.items()):
+                    h_node.add(f"[bold]{k}[/] = {v!r}")
 
         for child_id in children_of.get(wf_id, []):
             _render_wf(wf_node, child_id)

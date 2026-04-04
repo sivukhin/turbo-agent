@@ -161,7 +161,6 @@ class UserPromptResult:
     meta: dict = field(default_factory=dict)
 
 
-
 @dataclass
 class ConvAppendRequest:
     conversation_id: str

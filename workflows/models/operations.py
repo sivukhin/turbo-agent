@@ -70,7 +70,6 @@ class UserPromptOp:
     meta: dict = field(default_factory=dict)
 
 
-
 @dataclass
 class AiOp:
     messages: list[ChatMessage] | None = None

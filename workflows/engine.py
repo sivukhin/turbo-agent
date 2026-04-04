@@ -25,7 +25,7 @@ import workflows.events as ev
 
 def _strip_secrets(val):
     """Remove private_env from an op before persisting."""
-    if hasattr(val, 'private_env') and val.private_env:
+    if hasattr(val, "private_env") and val.private_env:
         val = copy.copy(val)
         val.private_env = None
     return val

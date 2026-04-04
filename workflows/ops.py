@@ -52,7 +52,11 @@ def sleep(seconds: float, meta=None) -> SleepOp:
 
 
 def shell(
-    command: str | list[str], isolation: Isolation, public_env=None, private_env=None, meta=None
+    command: str | list[str],
+    isolation: Isolation,
+    public_env=None,
+    private_env=None,
+    meta=None,
 ) -> ShellOp:
     return ShellOp(
         command=_to_command(command),
@@ -64,7 +68,11 @@ def shell(
 
 
 def shell_stream_start(
-    command: str | list[str], isolation: Isolation, public_env=None, private_env=None, meta=None
+    command: str | list[str],
+    isolation: Isolation,
+    public_env=None,
+    private_env=None,
+    meta=None,
 ) -> ShellStreamStartOp:
     return ShellStreamStartOp(
         command=_to_command(command),
@@ -91,7 +99,6 @@ def write_file(path: str, content: str, meta=None) -> WriteFileOp:
 
 def user_prompt(meta=None) -> UserPromptOp:
     return UserPromptOp(meta=meta or {})
-
 
 
 def ai(

@@ -89,6 +89,7 @@ def cmd_start(args):
 def _has_active_streams(state):
     """Check if any streams are active in-memory (non-durable)."""
     from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
+
     with _streams_lock:
         return any(sid in _active_streams for sid in state.streams)
 
@@ -102,10 +103,12 @@ def cmd_step(args):
         sys.exit(1)
 
     trace = getattr(args, "trace", False)
-    engine = Engine(EngineConfig(
-        workflows_registry=registry,
-        on_events=lambda events: print_events(events, trace=trace),
-    ))
+    engine = Engine(
+        EngineConfig(
+            workflows_registry=registry,
+            on_events=lambda events: print_events(events, trace=trace),
+        )
+    )
 
     # Run until safe pause point: no active in-memory streams
     try:
@@ -168,20 +171,20 @@ def _handle_user_prompts(store, execution_id, engine):
 
 def _format_conv_content(role, content):
     """Format conversation content for CLI display."""
-    if role == 'tool_use':
+    if role == "tool_use":
         try:
             data = json.loads(content) if isinstance(content, str) else content
-            name = data.get('name', '?')
-            inp = data.get('input', {})
-            if isinstance(inp, dict) and 'command' in inp:
+            name = data.get("name", "?")
+            inp = data.get("input", {})
+            if isinstance(inp, dict) and "command" in inp:
                 return f"{name}: {inp['command']}"
             return f"{name}({json.dumps(inp, ensure_ascii=False)})"
         except (json.JSONDecodeError, TypeError):
             pass
-    if role == 'tool_result':
+    if role == "tool_result":
         try:
             data = json.loads(content) if isinstance(content, str) else content
-            return data.get('output', str(content))
+            return data.get("output", str(content))
         except (json.JSONDecodeError, TypeError):
             pass
     return str(content)

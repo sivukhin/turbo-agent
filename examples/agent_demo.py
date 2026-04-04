@@ -93,7 +93,7 @@ def chat():
                     content=response.text,
                     meta={"model": response.model},
                 )
-                yield conv_append(role='assistant', content=response.text)
+                yield conv_append(role="assistant", content=response.text)
                 break
 
     return "Goodbye!"

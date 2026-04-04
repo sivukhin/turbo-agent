@@ -29,6 +29,7 @@ def stream_test():
             break
         yield f"stdout: {result.stdout}"
 
+
 @workflow
 def stream_test_2():
     stream = yield shell_stream_start(
@@ -41,8 +42,8 @@ def stream_test_2():
         if result.finished:
             break
         yield f"stdout: {result.stdout}"
-    
-    yield 'pause'
+
+    yield "pause"
     stream = yield shell_stream_start(
         "echo 1; sleep 1; echo 2; sleep 1; echo 3",
         isolation=HostIsolation(),

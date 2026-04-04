@@ -27,7 +27,7 @@ DOCKER_IMAGE = "turbo-review"
 
 
 def _private_env():
-    return {'ANTHROPIC_API_KEY': os.environ.get('ANTHROPIC_API_KEY', '')}
+    return {"ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", "")}
 
 
 @workflow
@@ -37,25 +37,31 @@ def run_claude(prompt, isolation, public_env=None):
     ClaudeStreamHandler handles conversation capture automatically.
     """
     stream = yield shell_stream_start(
-        ['claude', '--model', CLAUDE_MODEL,
-         '--output-format', 'stream-json',
-         '--verbose',
-         '--dangerously-skip-permissions',
-         '-p', prompt],
+        [
+            "claude",
+            "--model",
+            CLAUDE_MODEL,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--dangerously-skip-permissions",
+            "-p",
+            prompt,
+        ],
         isolation=isolation,
         public_env=public_env or {},
         private_env=_private_env(),
-        meta={'claude_code': True},
+        meta={"claude_code": True},
     )
 
-    final_text = ''
+    final_text = ""
     while True:
         raw = yield shell_stream_next(stream, private_env=_private_env())
         for line in raw.stdout:
             try:
                 event = json.loads(line)
-                if event.get('type') == 'result' and event.get('result'):
-                    final_text = event['result']
+                if event.get("type") == "result" and event.get("result"):
+                    final_text = event["result"]
             except (json.JSONDecodeError, KeyError):
                 pass
         if raw.finished:
@@ -67,15 +73,15 @@ def run_claude(prompt, isolation, public_env=None):
 @workflow
 def ask_claude(prompt):
     """Run Claude Code with a prompt, capturing all events into the conversation."""
-    yield conv_append(role='user', content=prompt)
+    yield conv_append(role="user", content=prompt)
 
     handle = run_claude(
         prompt,
-        isolation=DockerIsolation(image=DOCKER_IMAGE, network='host'),
-        public_env={'IS_SANDBOX': '1'},
+        isolation=DockerIsolation(image=DOCKER_IMAGE, network="host"),
+        public_env={"IS_SANDBOX": "1"},
     )
     result = yield wait(handle)
-    return result or 'no output'
+    return result or "no output"
 
 
 @workflow
@@ -89,12 +95,12 @@ def math_challenge():
         "Compute the exact value of the sum: sum_{k=1}^{1000} floor(sqrt(k)). "
         "Use Python to compute it. Show your work and verify the answer."
     )
-    yield conv_append(role='user', content=prompt)
+    yield conv_append(role="user", content=prompt)
 
     handle = run_claude(
         prompt,
-        isolation=DockerIsolation(image=DOCKER_IMAGE, network='host'),
-        public_env={'IS_SANDBOX': '1'},
+        isolation=DockerIsolation(image=DOCKER_IMAGE, network="host"),
+        public_env={"IS_SANDBOX": "1"},
     )
     result = yield wait(handle)
-    return result or 'no output'
+    return result or "no output"

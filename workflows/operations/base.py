@@ -23,29 +23,18 @@ class OpHandler(Protocol):
     def handle(val, ctx: OpContext) -> None: ...
 
 
-# Registry: op_type → handler class
-_HANDLERS: dict[type, type] = {}
-
-
-def register_handler(op_type):
-    """Decorator to register an op handler for a specific op type.
+def op_handler(op_type):
+    """Decorator that tags a handler class with the op type it handles.
 
     Usage:
-        @register_handler(ShellOp)
+        @op_handler(ShellOp)
         class ShellOpHandler:
             @staticmethod
             def handle(val, ctx): ...
     """
     def decorator(cls):
-        _HANDLERS[op_type] = cls
+        cls._op_type = op_type
         return cls
     return decorator
 
 
-def handle_op(val, ctx: OpContext) -> bool:
-    """Try to handle an op. Returns True if handled, False otherwise."""
-    handler = _HANDLERS.get(type(val))
-    if handler:
-        handler.handle(val, ctx)
-        return True
-    return False

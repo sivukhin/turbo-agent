@@ -1,9 +1,9 @@
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import ReadFileOp, WriteFileOp, Event
 import workflows.events as ev
 
 
-@register_handler(ReadFileOp)
+@op_handler(ReadFileOp)
 class ReadFileOpHandler:
     @staticmethod
     def handle(val: ReadFileOp, ctx: OpContext) -> None:
@@ -17,7 +17,7 @@ class ReadFileOpHandler:
         ))
 
 
-@register_handler(WriteFileOp)
+@op_handler(WriteFileOp)
 class WriteFileOpHandler:
     @staticmethod
     def handle(val: WriteFileOp, ctx: OpContext) -> None:

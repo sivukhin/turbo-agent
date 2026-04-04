@@ -1,9 +1,9 @@
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import SleepOp, HandlerState, Event
 import workflows.events as ev
 
 
-@register_handler(SleepOp)
+@op_handler(SleepOp)
 class SleepOpHandler:
     @staticmethod
     def handle(val: SleepOp, ctx: OpContext) -> None:

@@ -1,10 +1,10 @@
 import uuid
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import UserPromptOp, AiResponseOp, Event
 import workflows.events as ev
 
 
-@register_handler(UserPromptOp)
+@op_handler(UserPromptOp)
 class UserPromptOpHandler:
     @staticmethod
     def handle(val: UserPromptOp, ctx: OpContext) -> None:
@@ -17,7 +17,7 @@ class UserPromptOpHandler:
         ))
 
 
-@register_handler(AiResponseOp)
+@op_handler(AiResponseOp)
 class AiResponseOpHandler:
     @staticmethod
     def handle(val: AiResponseOp, ctx: OpContext) -> None:

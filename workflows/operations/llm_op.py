@@ -1,9 +1,9 @@
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import AiOp, Event
 import workflows.events as ev
 
 
-@register_handler(AiOp)
+@op_handler(AiOp)
 class AiOpHandler:
     @staticmethod
     def handle(val: AiOp, ctx: OpContext) -> None:

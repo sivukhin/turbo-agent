@@ -1,5 +1,5 @@
 import uuid
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.operations.shell_op import _serialize_isolation, _private_envs
 from workflows.ops import ShellStreamStartOp, ShellStreamNextOp, StreamDef, Event
 import workflows.events as ev
@@ -9,7 +9,7 @@ import workflows.events as ev
 _stream_private_envs: dict[str, dict] = {}
 
 
-@register_handler(ShellStreamStartOp)
+@op_handler(ShellStreamStartOp)
 class ShellStreamStartOpHandler:
     @staticmethod
     def handle(val: ShellStreamStartOp, ctx: OpContext) -> None:
@@ -48,7 +48,7 @@ class ShellStreamStartOpHandler:
         ))
 
 
-@register_handler(ShellStreamNextOp)
+@op_handler(ShellStreamNextOp)
 class ShellStreamNextOpHandler:
     @staticmethod
     def handle(val: ShellStreamNextOp, ctx: OpContext) -> None:

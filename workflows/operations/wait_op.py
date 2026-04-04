@@ -1,9 +1,9 @@
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import WaitOp, HandlerState, Event
 import workflows.events as ev
 
 
-@register_handler(WaitOp)
+@op_handler(WaitOp)
 class WaitOpHandler:
     @staticmethod
     def handle(val: WaitOp, ctx: OpContext) -> None:

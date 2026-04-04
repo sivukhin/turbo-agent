@@ -9,8 +9,8 @@ from workflows.conversation import _sortable_uuid
 from workflows.ops import (
     Event, WorkflowHandle, WorkflowState, HandlerState, ExecutionState,
 )
-from workflows.operations.base import handle_op, OpContext
-import workflows.operations  # trigger handler registration
+from workflows.operations import DEFAULT_OP_HANDLERS
+from workflows.operations.base import OpContext
 import workflows.events as ev
 
 
@@ -30,6 +30,7 @@ class EngineConfig:
     workflows_registry: dict = _field(default_factory=dict)
     workflow_event_handlers: dict = _field(default_factory=lambda: dict(HANDLER_REGISTRY))
     event_handlers: list = _field(default_factory=lambda: list(DEFAULT_EVENT_HANDLERS))
+    op_handlers: list = _field(default_factory=lambda: list(DEFAULT_OP_HANDLERS))
     on_events: object = None  # callback(events: list[Event]) called when events are appended
 
 
@@ -44,6 +45,7 @@ class Engine:
 
     def __init__(self, config: EngineConfig):
         self.config = config
+        self._op_handlers = {cls._op_type: cls for cls in config.op_handlers}
 
     def start(self, store, workflow_name, args, now=None, source_file=None,
               workdir=None, parent_conversation_id=None) -> str:
@@ -258,12 +260,16 @@ class Engine:
                 now=now,
                 workflow_event_handlers=self.config.workflow_event_handlers,
             )
-            if not handle_op(val, op_ctx):
-                new_events.append(Event(
-                    event_id=0, execution_id=execution_id,
-                    workflow_id=workflow_id, category='outbox',
-                    payload=ev.WorkflowYielded(value=val),
-                ))
+            handler = self._op_handlers.get(type(val))
+            if handler:
+                handler.handle(val, op_ctx)
+            new_events.append(Event(
+                event_id=0, 
+                execution_id=execution_id,
+                workflow_id=workflow_id, 
+                category='outbox',
+                payload=ev.WorkflowYielded(value=val),
+            ))
 
         return new_events
 

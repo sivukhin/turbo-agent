@@ -1,10 +1,10 @@
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import Event
 from workflows.conversation import ConvAppendOp, ConvListOp, ConvReadOp, ConvReplaceWithOp
 import workflows.events as ev
 
 
-@register_handler(ConvAppendOp)
+@op_handler(ConvAppendOp)
 class ConvAppendOpHandler:
     @staticmethod
     def handle(val: ConvAppendOp, ctx: OpContext) -> None:
@@ -12,15 +12,20 @@ class ConvAppendOpHandler:
             return
         ctx.wf.status = 'waiting'
         ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
+            event_id=0, 
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id, 
+            category='outbox',
             payload=ev.ConvAppendRequest(
                 conversation_id=ctx.wf.conversation_id,
-                role=val.role, content=val.content, meta=val.meta),
+                role=val.role, 
+                content=val.content, 
+                meta=val.meta
+            ),
         ))
 
 
-@register_handler(ConvListOp)
+@op_handler(ConvListOp)
 class ConvListOpHandler:
     @staticmethod
     def handle(val: ConvListOp, ctx: OpContext) -> None:
@@ -44,7 +49,7 @@ class ConvListOpHandler:
         ))
 
 
-@register_handler(ConvReadOp)
+@op_handler(ConvReadOp)
 class ConvReadOpHandler:
     @staticmethod
     def handle(val: ConvReadOp, ctx: OpContext) -> None:
@@ -63,7 +68,7 @@ class ConvReadOpHandler:
         ))
 
 
-@register_handler(ConvReplaceWithOp)
+@op_handler(ConvReplaceWithOp)
 class ConvReplaceWithOpHandler:
     @staticmethod
     def handle(val: ConvReplaceWithOp, ctx: OpContext) -> None:

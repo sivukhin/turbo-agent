@@ -1,4 +1,4 @@
-from workflows.operations.base import OpContext, register_handler
+from workflows.operations.base import OpContext, op_handler
 from workflows.ops import ShellOp, Event
 from workflows.isolation.host import HostIsolation
 from workflows.isolation.docker import DockerIsolation
@@ -15,7 +15,7 @@ def _serialize_isolation(isolation):
     return 'host', None
 
 
-@register_handler(ShellOp)
+@op_handler(ShellOp)
 class ShellOpHandler:
     @staticmethod
     def handle(val: ShellOp, ctx: OpContext) -> None:

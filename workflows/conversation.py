@@ -29,7 +29,7 @@ class _LatestType:
         return cls._instance
 
     def __repr__(self):
-        return "Latest"
+        return 'Latest'
 
     def __reduce__(self):
         return (_LatestType, ())
@@ -41,8 +41,7 @@ Latest = _LatestType()
 # ---- Yield functions ----
 
 
-def conv_append(role, content, meta=None):
-    """Append a message. Returns MessageRef. Content can be str or dict/list (auto-serialized to JSON)."""
+def conv_append(role: str, content, meta=None) -> ConvAppendOp:
     return ConvAppendOp(role=role, content=content, meta=meta or {})
 
 
@@ -52,8 +51,7 @@ def conv_list(
     end_message_id=None,
     role_filter=None,
     pattern=None,
-):
-    """List message refs. Returns [MessageRef]."""
+) -> ConvListOp:
     return ConvListOp(
         conversation=conversation,
         start_message_id=start_message_id,
@@ -63,13 +61,11 @@ def conv_list(
     )
 
 
-def conv_read(refs):
-    """Read messages by refs. Returns [Message]."""
+def conv_read(refs: list[MessageRef]) -> ConvReadOp:
     return ConvReadOp(refs=refs)
 
 
-def conv_replace_with(new_messages, start_ref=None, end_ref=None):
-    """Replace a range with new messages (compaction)."""
+def conv_replace_with(new_messages, start_ref=None, end_ref=None) -> ConvReplaceWithOp:
     return ConvReplaceWithOp(
         new_messages=new_messages,
         start_ref=start_ref,

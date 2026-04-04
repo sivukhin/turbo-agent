@@ -1,5 +1,6 @@
 import json
 import pickle
+import time
 import turso
 from workflows.ids import new_id
 from workflows.ops import ExecutionState, Event
@@ -71,7 +72,6 @@ class Store:
         state: ExecutionState,
         last_processed_event_id: int | None = None,
     ):
-        import time as _time
 
         cur = self.conn.cursor()
         cur.execute(
@@ -84,7 +84,7 @@ class Store:
             if last_processed_event_id is not None
             else (row[0] if row else 0)
         )
-        created_at = row[1] if row else _time.time()
+        created_at = row[1] if row else time.time()
 
         cur.execute(
             """INSERT OR REPLACE INTO executions
@@ -121,9 +121,8 @@ class Store:
 
     def append_events(self, events: list[tuple]) -> None:
         """Batch-append events. Each tuple: (execution_id, workflow_id, category, payload)."""
-        import time as _time
 
-        now = _time.time()
+        now = time.time()
         cur = self.conn.cursor()
         for execution_id, workflow_id, category, payload in events:
             cur.execute(
@@ -226,7 +225,6 @@ class Store:
         meta: dict | None = None,
         event_time: int = 0,
     ) -> MessageRef:
-        import time as _time
 
         if not isinstance(content, str):
             content = json.dumps(content)
@@ -244,7 +242,7 @@ class Store:
                 content,
                 json.dumps(meta),
                 event_time,
-                _time.time(),
+                time.time(),
             ),
         )
         self.conn.commit()

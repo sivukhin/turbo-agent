@@ -1,5 +1,6 @@
 import pickle
 import time
+from collections.abc import Callable
 from pathlib import Path
 from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
@@ -36,9 +37,7 @@ class EngineConfig:
     )
     event_handlers: list = _field(default_factory=lambda: list(DEFAULT_EVENT_HANDLERS))
     op_handlers: list = _field(default_factory=lambda: list(DEFAULT_OP_HANDLERS))
-    on_events: object = (
-        None  # callback(events: list[Event]) called when events are appended
-    )
+    on_events: Callable[[list[Event]], None] | None = None
 
 
 class Engine:
@@ -52,7 +51,7 @@ class Engine:
 
     def __init__(self, config: EngineConfig):
         self.config = config
-        self._op_handlers = {cls._op_type: cls for cls in config.op_handlers}
+        self._op_handlers = {cls.op_type(): cls for cls in config.op_handlers}
 
     def start(
         self,
@@ -101,35 +100,6 @@ class Engine:
     def step(self, store, execution_id, now=None):
         now = now if now is not None else time.time()
         self._tick_and_process(store, execution_id, now)
-        # Keep stepping while active streams exist
-        while self._has_active_streams(store, execution_id):
-            # Resolve stream handlers even without new DB events
-            state, last_processed = store.load_state(execution_id)
-            new_events = self._resolve_workflow_handlers(state, execution_id, now)
-            if new_events or any(
-                wf.status == "running" for wf in state.workflows.values()
-            ):
-                store.save_state(
-                    execution_id, state, last_processed_event_id=last_processed
-                )
-                self._emit_events(store, new_events)
-                self._tick_and_process(store, execution_id, now)
-            else:
-                # Queue empty, wait briefly for data
-                import time as _time
-
-                _time.sleep(0.01)
-            state, _ = store.load_state(execution_id)
-            if state.finished:
-                break
-
-    @staticmethod
-    def _has_active_streams(store, execution_id):
-        from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
-
-        state, _ = store.load_state(execution_id)
-        with _streams_lock:
-            return any(sid in _active_streams for sid in state.streams)
 
     def _emit_events(self, store, new_events):
         if new_events:

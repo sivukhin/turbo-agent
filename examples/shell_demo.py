@@ -1,9 +1,32 @@
-from workflows import workflow, wait, wait_all, shell, read_file, write_file
+from workflows import workflow, wait, wait_all, shell, read_file, write_file, shell_stream_start, shell_stream_next, user_prompt
+from workflows.events import ShellStreamLine
 from workflows.isolation import HostIsolation, StorageConfig
 
 
 host = HostIsolation()
 
+@workflow
+def stream_test():
+    stream = yield shell_stream_start(
+        'echo 1; sleep 1; echo 2; sleep 1; echo 3',
+        isolation=HostIsolation()
+    )
+    while True:
+        result: ShellStreamLine = yield shell_stream_next(stream)
+        if result.finished:
+            break
+        yield f'stdout: {result.stdout}'
+
+@workflow
+def shell_prompt():
+    yield 'hello'
+    input = yield user_prompt()
+    stream = yield shell_stream_start(input, isolation=HostIsolation())
+    while True:
+        result: ShellStreamLine = yield shell_stream_next(stream)
+        if result.finished:
+            break
+        yield f'stdout: {result.stdout}'
 
 @workflow
 def build_and_test():

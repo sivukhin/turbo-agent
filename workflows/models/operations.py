@@ -28,7 +28,7 @@ class SleepOp:
 @dataclass
 class ShellOp:
     command: str
-    isolation: Isolation | None = None
+    isolation: Isolation
     public_env: dict[str, str] | None = None
     private_env: dict[str, str] | None = None
 
@@ -36,7 +36,7 @@ class ShellOp:
 @dataclass
 class ShellStreamStartOp:
     command: str
-    isolation: Isolation | None = None
+    isolation: Isolation
     public_env: dict[str, str] | None = None
     private_env: dict[str, str] | None = None
 

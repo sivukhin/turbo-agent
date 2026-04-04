@@ -60,20 +60,19 @@ def cmd_start(args):
 
     parsed_args = [json.loads(a) for a in args.args]
     store = Store(DB_PATH)
-    engine = Engine(EngineConfig(workflows_registry=registry))
+    engine = Engine(EngineConfig(
+        workflows_registry=registry,
+        on_events=lambda events: print_events(events, trace=True),
+    ))
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
     execution_id = engine.start(
         store, wf_name, parsed_args, source_file=file_path, workdir=workdir
     )
-
-    inbox = store.read_inbox(execution_id)
-    outbox = store.read_outbox(execution_id)
     store.close()
 
     console.print(f"[bold]Started execution[/] [cyan]{execution_id}[/]")
     console.print(f"  workflow: [bold]{wf_name}[/]({', '.join(args.args)})")
-    _print_step_events(inbox, outbox, trace=True)
 
 
 def cmd_step(args):
@@ -84,22 +83,11 @@ def cmd_step(args):
         console.print(f"[yellow]Execution {args.id} already finished[/]")
         sys.exit(1)
 
-    inbox_before = store.read_inbox(args.id)
-    outbox_before = store.read_outbox(args.id)
-    last_inbox = inbox_before[-1].event_id if inbox_before else 0
-    last_outbox = outbox_before[-1].event_id if outbox_before else 0
-
     trace = getattr(args, "trace", False)
-
-    def _on_events(events):
-        _print_step_events(
-            [e for e in events if e.category == "inbox"],
-            [e for e in events if e.category == "outbox"],
-            trace=trace,
-        )
-
-    engine = Engine(EngineConfig(workflows_registry=registry))
-    engine.config.on_events = _on_events
+    engine = Engine(EngineConfig(
+        workflows_registry=registry,
+        on_events=lambda events: print_events(events, trace=trace),
+    ))
     try:
         engine.step(store, args.id)
     except Exception as e:
@@ -108,10 +96,6 @@ def cmd_step(args):
         sys.exit(1)
 
     state, _ = store.load_state(args.id)
-    new_inbox = store.read_inbox(args.id, after_event_id=last_inbox)
-    new_outbox = store.read_outbox(args.id, after_event_id=last_outbox)
-
-    _print_step_events(new_inbox, new_outbox, trace=True)
     if state.finished:
         root = state.workflows[state.root_workflow_id]
         console.print(f"  [bold green]returned:[/] {root.result!r}")
@@ -119,11 +103,11 @@ def cmd_step(args):
         return
 
     # Check for unanswered user prompts
-    _handle_user_prompts(store, args.id, engine, trace=True)
+    _handle_user_prompts(store, args.id, engine)
     store.close()
 
 
-def _handle_user_prompts(store, execution_id, engine, trace=False):
+def _handle_user_prompts(store, execution_id, engine):
     """Check for unanswered UserPromptRequest events, prompt user, send result."""
     from workflows.events import UserPromptRequest, UserPromptResult
 
@@ -155,21 +139,7 @@ def _handle_user_prompts(store, execution_id, engine, trace=False):
             UserPromptResult(request_id=request_id, response=response),
         )
 
-        # Process the new event so the workflow can continue
         engine.step(store, execution_id)
-
-        # Print any new events from this step
-        state, _ = store.load_state(execution_id)
-        new_outbox = store.read_outbox(execution_id, after_event_id=event.event_id)
-        new_inbox = store.read_inbox(execution_id, after_event_id=event.event_id)
-        _print_step_events(
-            [e for e in new_inbox if not isinstance(e.payload, UserPromptResult)],
-            [e for e in new_outbox if not isinstance(e.payload, UserPromptRequest)],
-            trace=trace,
-        )
-        if state.finished:
-            root = state.workflows[state.root_workflow_id]
-            console.print(f"  [bold green]returned:[/] {root.result!r}")
 
 
 def _print_claude_stream_line(line):
@@ -247,8 +217,9 @@ def _print_claude_stream_line(line):
             console.print(f"[bold green]claude done>[/] {str(result)[:500]}")
 
 
-def _print_step_events(inbox, outbox, trace=False):
-    all_events = sorted(inbox + outbox, key=lambda e: e.event_id)
+def print_events(events, trace=False):
+    """Print events to the CLI console."""
+    all_events = sorted(events, key=lambda e: e.event_id)
     for event in all_events:
         payload = event.payload
         if not trace:
@@ -654,39 +625,14 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
 def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
     """Run an execution to completion, handling user prompts interactively.
     Handles Ctrl+C gracefully — state is always persisted."""
-    last_event = 0
     interrupted = False
-
-    def _on_events(events):
-        nonlocal last_event
-        for e in events:
-            if e.event_id:
-                last_event = max(last_event, e.event_id)
-        _print_step_events(
-            [e for e in events if e.category == "inbox"],
-            [e for e in events if e.category == "outbox"],
-            trace=trace,
-        )
-
-    engine.config.on_events = _on_events
-
     try:
         for _ in range(max_steps):
             state, _ = store.load_state(execution_id)
             if state.finished:
                 break
 
-            # Print any events we missed (from previous steps)
-            all_new = store.read_all_events(execution_id, after_event_id=last_event)
-            if all_new:
-                last_event = all_new[-1].event_id
-                _print_step_events(
-                    [e for e in all_new if e.category == "inbox"],
-                    [e for e in all_new if e.category == "outbox"],
-                    trace=trace,
-                )
-
-            _handle_user_prompts(store, execution_id, engine, trace=trace)
+            _handle_user_prompts(store, execution_id, engine)
 
             state, _ = store.load_state(execution_id)
             if state.finished:
@@ -697,16 +643,7 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
     except KeyboardInterrupt:
         interrupted = True
 
-    # Final events
     state, _ = store.load_state(execution_id)
-    all_new = store.read_all_events(execution_id, after_event_id=last_event)
-    if all_new:
-        _print_step_events(
-            [e for e in all_new if e.category == "inbox"],
-            [e for e in all_new if e.category == "outbox"],
-            trace=trace,
-        )
-
     if interrupted:
         console.print(
             f"\n  [yellow]Paused[/] [cyan]{execution_id}[/] — resume with: "
@@ -729,15 +666,18 @@ def cmd_run(args):
         sys.exit(1)
 
     parsed_args = [json.loads(a) for a in args.args]
+    trace = getattr(args, "trace", False)
     store = Store(DB_PATH)
-    engine = Engine(EngineConfig(workflows_registry=registry))
+    engine = Engine(EngineConfig(
+        workflows_registry=registry,
+        on_events=lambda events: print_events(events, trace=trace),
+    ))
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
     execution_id = engine.start(
         store, wf_name, parsed_args, source_file=file_path, workdir=workdir
     )
 
-    trace = getattr(args, "trace", False)
     console.print(
         f"[bold]Running[/] [cyan]{execution_id}[/] {wf_name}({', '.join(args.args)})"
     )
@@ -755,7 +695,10 @@ def cmd_continue(args):
         sys.exit(1)
 
     trace = getattr(args, "trace", False)
-    engine = Engine(EngineConfig(workflows_registry=registry))
+    engine = Engine(EngineConfig(
+        workflows_registry=registry,
+        on_events=lambda events: print_events(events, trace=trace),
+    ))
     console.print(f"[bold]Continuing[/] [cyan]{args.id}[/]")
     _run_loop(store, engine, args.id, trace=trace)
     store.close()

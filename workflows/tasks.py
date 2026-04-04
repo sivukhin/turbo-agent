@@ -15,7 +15,9 @@ import json
 import os
 import time
 import turso
+from workflows.conversation import MessageRef
 from workflows.ids import new_id
+from workflows.store import Store
 
 
 def task_db_path(tasks_dir: str, task_id: str) -> str:
@@ -60,8 +62,6 @@ class TaskStore:
 
     def _get_task_store(self, task_id: str):
         """Get the execution Store for a task."""
-        from workflows.store import Store
-
         db = task_db_path(self.tasks_dir, task_id)
         os.makedirs(os.path.dirname(db), exist_ok=True)
         return Store(db)
@@ -160,8 +160,6 @@ class TaskStore:
         if "name" in kwargs or "description" in kwargs:
             conv_id = task["context_conversation_id"]
             if conv_id:
-                from workflows.conversation import MessageRef
-
                 store = self._get_task_store(task_id)
                 if "name" in kwargs and task["title_message_id"]:
                     store.conv_update_message(

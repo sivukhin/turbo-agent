@@ -3,6 +3,7 @@ import types
 import functools
 import contextvars
 from workflows.ids import new_id
+from workflows.models.state import WorkflowHandle
 from bytecode import (
     Bytecode,
     Instr,
@@ -144,8 +145,6 @@ def workflow(func):
     as a concurrent child and returns a WorkflowHandle.
     When called at top level, returns a DurableGenerator.
     """
-    from workflows.engine import WorkflowHandle
-
     bc = Bytecode.from_code(func.__code__)
     orig_argnames = list(bc.argnames)
     orig_varnames = [

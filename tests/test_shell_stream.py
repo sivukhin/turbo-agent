@@ -8,6 +8,7 @@ from workflows import (
     Engine,
     EngineConfig,
     Store,
+    shell,
     shell_stream_start,
     shell_stream_next,
     ShellStreamLine,
@@ -71,6 +72,12 @@ def stream_all():
 
 
 @workflow
+def shell_with_meta():
+    result = yield shell('echo hi', isolation=HostIsolation(), meta={'tag': 'build'})
+    return result
+
+
+@workflow
 def stream_with_meta():
     stream = yield shell_stream_start(
         'echo "hello"', isolation=HostIsolation(), meta={'source': 'test'}
@@ -91,6 +98,7 @@ def engine_and_store():
         "stream_exit_code": stream_exit_code,
         "stream_stderr": stream_stderr,
         "stream_all": stream_all,
+        "shell_with_meta": shell_with_meta,
         "stream_with_meta": stream_with_meta,
     }
     engine = Engine(EngineConfig(workflows_registry=registry))
@@ -171,3 +179,19 @@ class TestShellStream:
         assert len(next_events) >= 1
         for e in next_events:
             assert e.payload.meta.get('source') == 'test'
+
+    def test_shell_meta_propagates_to_result(self, engine_and_store):
+        """ShellResult should inherit meta from ShellRequest."""
+        engine, store = engine_and_store
+        eid = engine.start(store, "shell_with_meta", [], workdir=tempfile.mkdtemp())
+        state = _run_to_completion(engine, store, eid)
+        assert state.finished
+        from workflows.events import ShellRequest, ShellResult
+        outbox = store.read_outbox(eid)
+        inbox = store.read_inbox(eid)
+        requests = [e for e in outbox if isinstance(e.payload, ShellRequest)]
+        results = [e for e in inbox if isinstance(e.payload, ShellResult)]
+        assert len(requests) == 1
+        assert requests[0].payload.meta == {'tag': 'build'}
+        assert len(results) == 1
+        assert results[0].payload.meta == {'tag': 'build'}

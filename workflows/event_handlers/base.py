@@ -1,5 +1,7 @@
 """Shared utilities for event handlers."""
 
+import re
+
 from workflows.ops import Event
 from workflows.events import payload_type_name
 
@@ -24,25 +26,15 @@ def make_inbox_event(event, payload):
     )
 
 
-# Registry: event payload type name → handler instance
-_EVENT_HANDLERS: dict[str, object] = {}
+def _to_snake(name: str) -> str:
+    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
+    s = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', s)
+    return s.lower()
 
 
 def register_event_handler(payload_type):
-    """Decorator to register an event handler for a specific event payload type.
-
-    Usage:
-        @register_event_handler(ev.ShellRequest)
-        class ShellRequestHandler:
-            def handle(self, event, store, state): ...
-    """
-    type_name = payload_type_name(payload_type.__new__(payload_type))
-    # For dataclasses that need args, compute name from class directly
-    import re
-
-    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", payload_type.__name__)
-    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
-    type_name = s.lower()
+    """Decorator to register an event handler for a specific event payload type."""
+    type_name = _to_snake(payload_type.__name__)
 
     def decorator(cls):
         cls._event_type_name = type_name

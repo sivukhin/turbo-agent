@@ -22,6 +22,7 @@ class FileReadRequestHandler:
                 ev.FileReadResult(
                     path=payload.path,
                     content=content,
+                    meta=payload.meta,
                 ),
             )
         ]
@@ -44,6 +45,7 @@ class FileWriteRequestHandler:
                 ev.FileWriteResult(
                     path=payload.path,
                     size=len(payload.content),
+                    meta=payload.meta,
                 ),
             )
         ]

@@ -124,6 +124,7 @@ class LlmRequestHandler:
                     ]
                     or None,
                     message_id=result.message_id,
+                    meta=payload.meta,
                 ),
             )
         ]

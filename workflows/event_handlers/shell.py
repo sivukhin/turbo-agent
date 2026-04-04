@@ -7,6 +7,7 @@ from workflows.event_handlers.base import (
     make_inbox_event,
     register_event_handler,
 )
+from workflows.operations.shell_op import _private_envs
 import workflows.events as ev
 
 
@@ -25,8 +26,6 @@ class ShellRequestHandler:
             return []
         workdir = Path(wf.workdir)
         isolation = _make_isolation(payload.isolation_type, payload.isolation_config)
-        from workflows.operations.shell_op import _private_envs
-
         merged_env = {
             **(payload.public_env or {}),
             **_private_envs.pop(event.workflow_id, {}),
@@ -42,6 +41,7 @@ class ShellRequestHandler:
                     exit_code=result.exit_code,
                     stdout=result.stdout,
                     stderr=result.stderr,
+                    meta=payload.meta,
                 ),
             )
         ]

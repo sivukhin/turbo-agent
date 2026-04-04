@@ -1,5 +1,5 @@
 from workflows import workflow, wait, wait_all, shell, read_file, write_file, shell_stream_start, shell_stream_next, user_prompt
-from workflows.events import ShellStreamLine
+from workflows.events import ShellStreamLineEvent
 from workflows.isolation import HostIsolation, StorageConfig
 
 
@@ -9,10 +9,11 @@ host = HostIsolation()
 def stream_test():
     stream = yield shell_stream_start(
         'echo 1; sleep 1; echo 2; sleep 1; echo 3',
-        isolation=HostIsolation()
+        isolation=HostIsolation(),
+        meta={'shell': 'demo'},
     )
     while True:
-        result: ShellStreamLine = yield shell_stream_next(stream)
+        result: ShellStreamLineEvent = yield shell_stream_next(stream)
         if result.finished:
             break
         yield f'stdout: {result.stdout}'
@@ -23,7 +24,7 @@ def shell_prompt():
     input = yield user_prompt()
     stream = yield shell_stream_start(input, isolation=HostIsolation())
     while True:
-        result: ShellStreamLine = yield shell_stream_next(stream)
+        result: ShellStreamLineEvent = yield shell_stream_next(stream)
         if result.finished:
             break
         yield f'stdout: {result.stdout}'

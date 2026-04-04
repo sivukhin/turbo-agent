@@ -34,6 +34,7 @@ class ShellResult:
     exit_code: int
     stdout: str
     stderr: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -49,6 +50,7 @@ class ShellStreamStartRequest:
 @dataclass
 class ShellStreamStartResult:
     stream_id: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -58,12 +60,13 @@ class ShellStreamNextRequest:
 
 
 @dataclass
-class ShellStreamLine:
+class ShellStreamLineEvent:
     stream_id: str
     stdout: list[str] = field(default_factory=list)
     stderr: list[str] = field(default_factory=list)
     finished: bool = False
     exit_code: int | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -76,6 +79,7 @@ class FileReadRequest:
 class FileReadResult:
     path: str
     content: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -89,6 +93,7 @@ class FileWriteRequest:
 class FileWriteResult:
     path: str
     size: int
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -140,6 +145,7 @@ class LlmResponse:
     text: str = ""
     tool_calls: list[dict] | None = None
     message_id: str | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -152,6 +158,7 @@ class UserPromptRequest:
 class UserPromptResult:
     request_id: str
     response: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -192,6 +199,7 @@ class ConvListRequest:
 class ConvListResult:
     count: int
     message_refs: list[MessageRef]
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -203,6 +211,7 @@ class ConvReadRequest:
 @dataclass
 class ConvReadResult:
     count: int
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -219,3 +228,4 @@ class ConvReplaceWithResult:
     conversation_id: str
     new_layer: int
     new_message_refs: list[MessageRef]
+    meta: dict = field(default_factory=dict)

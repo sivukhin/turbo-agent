@@ -30,4 +30,5 @@ class SleepState:
 @dataclass
 class StreamNextState:
     stream_id: str
+    meta: dict = field(default_factory=dict)
     emit_events: list = field(default_factory=list)

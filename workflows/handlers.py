@@ -8,7 +8,9 @@ Two types of handlers:
 """
 
 from typing import Protocol
+from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
 from workflows.events import WorkflowFinished
+from workflows.events import ShellStreamLineEvent
 from workflows.models.handler_state import (
     WaitState,
     WaitAllState,
@@ -16,6 +18,8 @@ from workflows.models.handler_state import (
     SleepState,
     StreamNextState,
 )
+from workflows.models.state import ShellStreamLine
+from workflows.operations.shell_stream_op import _stream_private_envs
 
 
 # ---- Base protocols ----
@@ -147,10 +151,6 @@ class StreamNextHandler:
 
     @staticmethod
     def resolve(state: StreamNextState, wf, now) -> bool:
-        from workflows.ops import ShellStreamLine
-        from workflows.events import ShellStreamLine as EvShellStreamLine
-        from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
-
         if not state.stream_id:
             return False
 
@@ -161,7 +161,7 @@ class StreamNextHandler:
             wf.status = 'running'
             wf.send_val = line
             state.emit_events.append(
-                EvShellStreamLine(stream_id=state.stream_id, stdout=[], stderr=[], finished=True, exit_code=-1)
+                ShellStreamLineEvent(stream_id=state.stream_id, stdout=[], stderr=[], finished=True, exit_code=-1, meta=state.meta)
             )
             return True
 
@@ -176,11 +176,10 @@ class StreamNextHandler:
             wf.status = 'running'
             wf.send_val = line
             state.emit_events.append(
-                EvShellStreamLine(stream_id=state.stream_id, stdout=stdout_lines, stderr=stderr_lines, finished=True, exit_code=exit_code)
+                ShellStreamLineEvent(stream_id=state.stream_id, stdout=stdout_lines, stderr=stderr_lines, finished=True, exit_code=exit_code, meta=state.meta)
             )
             with _streams_lock:
                 _active_streams.pop(state.stream_id, None)
-            from workflows.operations.shell_stream_op import _stream_private_envs
             _stream_private_envs.pop(state.stream_id, None)
             return True
 
@@ -189,7 +188,7 @@ class StreamNextHandler:
         wf.status = 'running'
         wf.send_val = line
         state.emit_events.append(
-            EvShellStreamLine(stream_id=state.stream_id, stdout=stdout_lines, stderr=stderr_lines, finished=False)
+            ShellStreamLineEvent(stream_id=state.stream_id, stdout=stdout_lines, stderr=stderr_lines, finished=False, meta=state.meta)
         )
         return True
 

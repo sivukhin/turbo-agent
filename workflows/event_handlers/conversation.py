@@ -19,18 +19,13 @@ class ConvAppendRequestHandler:
             event_time=event.event_id,
         )
         resolve_wf(state, event.workflow_id, ref)
-        return [
-            make_inbox_event(
-                event,
-                ev.ConvAppendResult(
-                    conversation_id=ref.conversation_id,
-                    message_id=ref.message_id,
-                    layer=ref.layer,
-                    role=ref.role,
-                    meta=ref.meta,
-                ),
-            )
-        ]
+        return [make_inbox_event(event, ev.ConvAppendResult(
+            conversation_id=ref.conversation_id,
+            message_id=ref.message_id,
+            layer=ref.layer,
+            role=ref.role,
+            meta=payload.meta,
+        ))]
 
 
 @register_event_handler(ev.ConvListRequest)
@@ -46,15 +41,11 @@ class ConvListRequestHandler:
             pattern=payload.pattern,
         )
         resolve_wf(state, event.workflow_id, refs)
-        return [
-            make_inbox_event(
-                event,
-                ev.ConvListResult(
-                    count=len(refs),
-                    message_refs=refs,
-                ),
-            )
-        ]
+        return [make_inbox_event(event, ev.ConvListResult(
+            count=len(refs),
+            message_refs=refs,
+            meta=payload.meta,
+        ))]
 
 
 @register_event_handler(ev.ConvReadRequest)
@@ -63,7 +54,10 @@ class ConvReadRequestHandler:
         payload = event.payload
         messages = store.conv_read_messages(payload.message_refs)
         resolve_wf(state, event.workflow_id, messages)
-        return [make_inbox_event(event, ev.ConvReadResult(count=len(messages)))]
+        return [make_inbox_event(event, ev.ConvReadResult(
+            count=len(messages),
+            meta=payload.meta,
+        ))]
 
 
 @register_event_handler(ev.ConvReplaceWithRequest)
@@ -78,13 +72,9 @@ class ConvReplaceWithRequestHandler:
             event_time=event.event_id,
         )
         resolve_wf(state, event.workflow_id, new_refs)
-        return [
-            make_inbox_event(
-                event,
-                ev.ConvReplaceWithResult(
-                    conversation_id=payload.conversation_id,
-                    new_layer=new_refs[0].layer if new_refs else 0,
-                    new_message_refs=new_refs,
-                ),
-            )
-        ]
+        return [make_inbox_event(event, ev.ConvReplaceWithResult(
+            conversation_id=payload.conversation_id,
+            new_layer=new_refs[0].layer if new_refs else 0,
+            new_message_refs=new_refs,
+            meta=payload.meta,
+        ))]

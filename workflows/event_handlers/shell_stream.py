@@ -10,6 +10,9 @@ from workflows.event_handlers.base import (
     make_inbox_event,
     register_event_handler,
 )
+from workflows.models.handler_state import StreamNextState
+from workflows.models.state import HandlerState
+from workflows.operations.shell_stream_op import _stream_private_envs
 import workflows.events as ev
 
 
@@ -87,8 +90,6 @@ class ShellStreamStartRequestHandler:
         if not wf or not wf.workdir:
             return []
 
-        from workflows.operations.shell_stream_op import _stream_private_envs
-
         private_env = _stream_private_envs.get(payload.stream_id, {})
         merged_env = {**(payload.public_env or {}), **private_env}
         _ensure_stream(
@@ -103,7 +104,7 @@ class ShellStreamStartRequestHandler:
         resolve_wf(state, event.workflow_id, payload.stream_id)
         return [
             make_inbox_event(
-                event, ev.ShellStreamStartResult(stream_id=payload.stream_id)
+                event, ev.ShellStreamStartResult(stream_id=payload.stream_id, meta=payload.meta)
             )
         ]
 
@@ -121,8 +122,6 @@ class ShellStreamNextRequestHandler:
         if not running:
             stream_def = state.streams.get(stream_id)
             if stream_def and wf and wf.workdir:
-                from workflows.operations.shell_stream_op import _stream_private_envs
-
                 private_env = _stream_private_envs.get(stream_id, {})
                 merged_env = {**(stream_def.public_env or {}), **private_env}
                 _ensure_stream(
@@ -134,13 +133,9 @@ class ShellStreamNextRequestHandler:
                     Path(wf.workdir),
                 )
 
-        # Register a poll handler that will deliver the next line via resolve()
-        from workflows.ops import HandlerState
-        from workflows.models.handler_state import StreamNextState
-
         state.handlers[event.workflow_id] = HandlerState(
             handler_type="stream_next",
-            state=StreamNextState(stream_id=stream_id),
+            state=StreamNextState(stream_id=stream_id, meta=payload.meta),
         )
 
         return []

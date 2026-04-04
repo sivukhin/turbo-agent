@@ -2,6 +2,7 @@ import json
 
 from dotenv import load_dotenv
 
+from workflows.cost import compute_cost
 from workflows.event_handlers.base import (
     resolve_wf,
     make_inbox_event,
@@ -9,6 +10,7 @@ from workflows.event_handlers.base import (
 )
 from workflows.llm.anthropic import AnthropicProvider
 from workflows.llm.openai import OpenAIProvider
+from workflows.models.state import Event
 import workflows.events as ev
 
 load_dotenv()
@@ -109,6 +111,20 @@ class LlmRequestHandler:
             tools=payload.tools,
         )
         resolve_wf(state, event.workflow_id, result)
+
+        usage = result.usage or {}
+        input_tokens = usage.get('input_tokens', 0)
+        output_tokens = usage.get('output_tokens', 0)
+        cache_creation = usage.get('cache_creation_input_tokens', 0)
+        cache_read = usage.get('cache_read_input_tokens', 0) or usage.get('cached_tokens', 0)
+        cost = compute_cost(
+            payload.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_input_tokens=cache_creation,
+            cache_read_input_tokens=cache_read,
+        )
+
         return [
             make_inbox_event(
                 event,
@@ -126,5 +142,21 @@ class LlmRequestHandler:
                     message_id=result.message_id,
                     meta=payload.meta,
                 ),
-            )
+            ),
+            Event(
+                event_id=0,
+                execution_id=event.execution_id,
+                workflow_id=event.workflow_id,
+                category='inbox',
+                payload=ev.UsageEvent(
+                    model=payload.model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_creation_input_tokens=cache_creation,
+                    cache_read_input_tokens=cache_read,
+                    cost_usd=cost,
+                    source='llm',
+                    meta=payload.meta,
+                ),
+            ),
         ]

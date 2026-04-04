@@ -38,6 +38,7 @@ from workflows.models.events import (  # noqa: F401
     ConvReadResult,
     ConvReplaceWithRequest,
     ConvReplaceWithResult,
+    UsageEvent,
 )
 
 
@@ -72,6 +73,7 @@ _ALL_PAYLOADS = [
     ConvReadResult,
     ConvReplaceWithRequest,
     ConvReplaceWithResult,
+    UsageEvent,
 ]
 
 PAYLOAD_REGISTRY: dict[str, type] = {

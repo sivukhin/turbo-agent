@@ -223,3 +223,16 @@ class ConvReplaceWithResult:
     new_layer: int
     new_message_refs: list[MessageRef]
     meta: dict = field(default_factory=dict)
+
+
+@dataclass
+class UsageEvent:
+    """Token usage and cost for an LLM call."""
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cost_usd: float = 0.0
+    source: str = ''  # 'llm' for direct calls, 'claude_code' for Claude Code streams
+    meta: dict = field(default_factory=dict)

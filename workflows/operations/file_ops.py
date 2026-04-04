@@ -6,26 +6,32 @@ import workflows.events as ev
 @op_handler(ReadFileOp)
 def handle_read_file(val: ReadFileOp, ctx: OpContext) -> None:
     if not ctx.wf.workdir:
-        raise RuntimeError(f'Workflow {ctx.workflow_id} has no workdir configured')
-    ctx.wf.status = 'waiting'
-    ctx.new_events.append(Event(
-        event_id=0,
-        execution_id=ctx.execution_id,
-        workflow_id=ctx.workflow_id,
-        category='outbox',
-        payload=ev.FileReadRequest(path=val.path, meta=val.meta),
-    ))
+        raise RuntimeError(f"Workflow {ctx.workflow_id} has no workdir configured")
+    ctx.wf.status = "waiting"
+    ctx.new_events.append(
+        Event(
+            event_id=0,
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            category="outbox",
+            payload=ev.FileReadRequest(path=val.path, meta=val.meta),
+        )
+    )
 
 
 @op_handler(WriteFileOp)
 def handle_write_file(val: WriteFileOp, ctx: OpContext) -> None:
     if not ctx.wf.workdir:
-        raise RuntimeError(f'Workflow {ctx.workflow_id} has no workdir configured')
-    ctx.wf.status = 'waiting'
-    ctx.new_events.append(Event(
-        event_id=0,
-        execution_id=ctx.execution_id,
-        workflow_id=ctx.workflow_id,
-        category='outbox',
-        payload=ev.FileWriteRequest(path=val.path, content=val.content, meta=val.meta),
-    ))
+        raise RuntimeError(f"Workflow {ctx.workflow_id} has no workdir configured")
+    ctx.wf.status = "waiting"
+    ctx.new_events.append(
+        Event(
+            event_id=0,
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            category="outbox",
+            payload=ev.FileWriteRequest(
+                path=val.path, content=val.content, meta=val.meta
+            ),
+        )
+    )

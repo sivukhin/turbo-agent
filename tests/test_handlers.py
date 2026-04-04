@@ -1,7 +1,12 @@
 """Unit tests for handler implementations."""
 
 from workflows.handlers import WaitHandler, WaitAllHandler, WaitAnyHandler, SleepHandler
-from workflows.models.handler_state import WaitState, WaitAllState, WaitAnyState, SleepState
+from workflows.models.handler_state import (
+    WaitState,
+    WaitAllState,
+    WaitAnyState,
+    SleepState,
+)
 from workflows.events import WorkflowFinished
 
 

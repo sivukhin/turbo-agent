@@ -21,9 +21,15 @@ def op_handler(op_type):
         @op_handler(ShellOp)
         def handle_shell(val: ShellOp, ctx: OpContext) -> None: ...
     """
+
     def decorator(func):
-        return type(func.__name__, (), {
-            'op_type': staticmethod(lambda: op_type),
-            'handle': staticmethod(func),
-        })
+        return type(
+            func.__name__,
+            (),
+            {
+                "op_type": staticmethod(lambda: op_type),
+                "handle": staticmethod(func),
+            },
+        )
+
     return decorator

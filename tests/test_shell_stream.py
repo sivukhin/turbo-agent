@@ -73,19 +73,19 @@ def stream_all():
 
 @workflow
 def shell_with_meta():
-    result = yield shell('echo hi', isolation=HostIsolation(), meta={'tag': 'build'})
+    result = yield shell("echo hi", isolation=HostIsolation(), meta={"tag": "build"})
     return result
 
 
 @workflow
 def stream_with_meta():
     stream = yield shell_stream_start(
-        'echo "hello"', isolation=HostIsolation(), meta={'source': 'test'}
+        'echo "hello"', isolation=HostIsolation(), meta={"source": "test"}
     )
     line = yield shell_stream_next(stream)
     while not line.finished:
         line = yield shell_stream_next(stream)
-    return 'done'
+    return "done"
 
 
 @pytest.fixture
@@ -172,13 +172,18 @@ class TestShellStream:
         state = _run_to_completion(engine, store, eid)
         outbox = store.read_outbox(eid)
         from workflows.events import ShellStreamStartRequest, ShellStreamNextRequest
-        start_events = [e for e in outbox if isinstance(e.payload, ShellStreamStartRequest)]
-        next_events = [e for e in outbox if isinstance(e.payload, ShellStreamNextRequest)]
+
+        start_events = [
+            e for e in outbox if isinstance(e.payload, ShellStreamStartRequest)
+        ]
+        next_events = [
+            e for e in outbox if isinstance(e.payload, ShellStreamNextRequest)
+        ]
         assert len(start_events) >= 1
-        assert start_events[0].payload.meta == {'source': 'test'}
+        assert start_events[0].payload.meta == {"source": "test"}
         assert len(next_events) >= 1
         for e in next_events:
-            assert e.payload.meta.get('source') == 'test'
+            assert e.payload.meta.get("source") == "test"
 
     def test_shell_meta_propagates_to_result(self, engine_and_store):
         """ShellResult should inherit meta from ShellRequest."""
@@ -187,11 +192,12 @@ class TestShellStream:
         state = _run_to_completion(engine, store, eid)
         assert state.finished
         from workflows.events import ShellRequest, ShellResult
+
         outbox = store.read_outbox(eid)
         inbox = store.read_inbox(eid)
         requests = [e for e in outbox if isinstance(e.payload, ShellRequest)]
         results = [e for e in inbox if isinstance(e.payload, ShellResult)]
         assert len(requests) == 1
-        assert requests[0].payload.meta == {'tag': 'build'}
+        assert requests[0].payload.meta == {"tag": "build"}
         assert len(results) == 1
-        assert results[0].payload.meta == {'tag': 'build'}
+        assert results[0].payload.meta == {"tag": "build"}

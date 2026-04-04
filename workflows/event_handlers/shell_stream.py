@@ -104,7 +104,10 @@ class ShellStreamStartRequestHandler:
         resolve_wf(state, event.workflow_id, payload.stream_id)
         return [
             make_inbox_event(
-                event, ev.ShellStreamStartResult(stream_id=payload.stream_id, meta=payload.meta)
+                event,
+                ev.ShellStreamStartResult(
+                    stream_id=payload.stream_id, meta=payload.meta
+                ),
             )
         ]
 

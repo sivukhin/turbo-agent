@@ -60,10 +60,12 @@ def cmd_start(args):
 
     parsed_args = [json.loads(a) for a in args.args]
     store = Store(DB_PATH)
-    engine = Engine(EngineConfig(
-        workflows_registry=registry,
-        on_events=lambda events: print_events(events, trace=True),
-    ))
+    engine = Engine(
+        EngineConfig(
+            workflows_registry=registry,
+            on_events=lambda events: print_events(events, trace=True),
+        )
+    )
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
     execution_id = engine.start(
@@ -84,10 +86,12 @@ def cmd_step(args):
         sys.exit(1)
 
     trace = getattr(args, "trace", False)
-    engine = Engine(EngineConfig(
-        workflows_registry=registry,
-        on_events=lambda events: print_events(events, trace=trace),
-    ))
+    engine = Engine(
+        EngineConfig(
+            workflows_registry=registry,
+            on_events=lambda events: print_events(events, trace=trace),
+        )
+    )
     try:
         engine.step(store, args.id)
     except Exception as e:
@@ -668,10 +672,12 @@ def cmd_run(args):
     parsed_args = [json.loads(a) for a in args.args]
     trace = getattr(args, "trace", False)
     store = Store(DB_PATH)
-    engine = Engine(EngineConfig(
-        workflows_registry=registry,
-        on_events=lambda events: print_events(events, trace=trace),
-    ))
+    engine = Engine(
+        EngineConfig(
+            workflows_registry=registry,
+            on_events=lambda events: print_events(events, trace=trace),
+        )
+    )
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
     execution_id = engine.start(
@@ -695,10 +701,12 @@ def cmd_continue(args):
         sys.exit(1)
 
     trace = getattr(args, "trace", False)
-    engine = Engine(EngineConfig(
-        workflows_registry=registry,
-        on_events=lambda events: print_events(events, trace=trace),
-    ))
+    engine = Engine(
+        EngineConfig(
+            workflows_registry=registry,
+            on_events=lambda events: print_events(events, trace=trace),
+        )
+    )
     console.print(f"[bold]Continuing[/] [cyan]{args.id}[/]")
     _run_loop(store, engine, args.id, trace=trace)
     store.close()

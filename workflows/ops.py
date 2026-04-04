@@ -29,22 +29,24 @@ from workflows.models.state import (  # noqa: F401
 
 
 def wait(handle, meta=None) -> WaitOp:
-    return WaitOp(deps=[handle.id], mode='wait', meta=meta or {})
+    return WaitOp(deps=[handle.id], mode="wait", meta=meta or {})
 
 
 def wait_all(handles, meta=None) -> WaitOp:
-    return WaitOp(deps=[h.id for h in handles], mode='wait_all', meta=meta or {})
+    return WaitOp(deps=[h.id for h in handles], mode="wait_all", meta=meta or {})
 
 
 def wait_any(handles, meta=None) -> WaitOp:
-    return WaitOp(deps=[h.id for h in handles], mode='wait_any', meta=meta or {})
+    return WaitOp(deps=[h.id for h in handles], mode="wait_any", meta=meta or {})
 
 
 def sleep(seconds: float, meta=None) -> SleepOp:
     return SleepOp(seconds=seconds, meta=meta or {})
 
 
-def shell(command: str, isolation: Isolation, public_env=None, private_env=None, meta=None) -> ShellOp:
+def shell(
+    command: str, isolation: Isolation, public_env=None, private_env=None, meta=None
+) -> ShellOp:
     return ShellOp(
         command=command,
         isolation=isolation,
@@ -54,7 +56,9 @@ def shell(command: str, isolation: Isolation, public_env=None, private_env=None,
     )
 
 
-def shell_stream_start(command: str, isolation: Isolation, public_env=None, private_env=None, meta=None) -> ShellStreamStartOp:
+def shell_stream_start(
+    command: str, isolation: Isolation, public_env=None, private_env=None, meta=None
+) -> ShellStreamStartOp:
     return ShellStreamStartOp(
         command=command,
         isolation=isolation,
@@ -65,7 +69,9 @@ def shell_stream_start(command: str, isolation: Isolation, public_env=None, priv
 
 
 def shell_stream_next(stream_id: str, private_env=None, meta=None) -> ShellStreamNextOp:
-    return ShellStreamNextOp(stream_id=stream_id, private_env=private_env, meta=meta or {})
+    return ShellStreamNextOp(
+        stream_id=stream_id, private_env=private_env, meta=meta or {}
+    )
 
 
 def read_file(path: str, meta=None) -> ReadFileOp:
@@ -88,7 +94,7 @@ def ai(
     messages=None,
     *,
     conversation=None,
-    model='anthropic/claude-sonnet-4-20250514',
+    model="anthropic/claude-sonnet-4-20250514",
     max_tokens=None,
     temperature=0.0,
     system=None,

@@ -15,6 +15,7 @@ from workflows.event_handlers.conversation import (
     ConvReplaceWithRequestHandler,
 )
 from workflows.event_handlers.user_prompt import UserPromptResultHandler
+from workflows.event_handlers.claude_stream import ClaudeStreamHandler
 
 DEFAULT_EVENT_HANDLERS = [
     ShellRequestHandler(),
@@ -28,6 +29,7 @@ DEFAULT_EVENT_HANDLERS = [
     UserPromptResultHandler(),
     ShellStreamStartRequestHandler(),
     ShellStreamNextRequestHandler(),
+    ClaudeStreamHandler(),
 ]
 
 __all__ = [
@@ -39,5 +41,6 @@ __all__ = [
     "ConvListRequestHandler",
     "ConvReadRequestHandler",
     "ConvReplaceWithRequestHandler",
+    "ClaudeStreamHandler",
     "DEFAULT_EVENT_HANDLERS",
 ]

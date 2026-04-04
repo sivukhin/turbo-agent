@@ -29,7 +29,7 @@ class _LatestType:
         return cls._instance
 
     def __repr__(self):
-        return 'Latest'
+        return "Latest"
 
     def __reduce__(self):
         return (_LatestType, ())
@@ -67,7 +67,9 @@ def conv_read(refs: list[MessageRef], meta=None) -> ConvReadOp:
     return ConvReadOp(refs=refs, meta=meta or {})
 
 
-def conv_replace_with(new_messages, start_ref=None, end_ref=None, meta=None) -> ConvReplaceWithOp:
+def conv_replace_with(
+    new_messages, start_ref=None, end_ref=None, meta=None
+) -> ConvReplaceWithOp:
     return ConvReplaceWithOp(
         new_messages=new_messages,
         start_ref=start_ref,

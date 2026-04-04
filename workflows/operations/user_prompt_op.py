@@ -7,23 +7,27 @@ import workflows.events as ev
 @op_handler(UserPromptOp)
 def handle_user_prompt(val: UserPromptOp, ctx: OpContext) -> None:
     request_id = new_id()
-    ctx.wf.status = 'waiting'
-    ctx.new_events.append(Event(
-        event_id=0,
-        execution_id=ctx.execution_id,
-        workflow_id=ctx.workflow_id,
-        category='outbox',
-        payload=ev.UserPromptRequest(request_id=request_id, meta=val.meta),
-    ))
+    ctx.wf.status = "waiting"
+    ctx.new_events.append(
+        Event(
+            event_id=0,
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            category="outbox",
+            payload=ev.UserPromptRequest(request_id=request_id, meta=val.meta),
+        )
+    )
 
 
 @op_handler(AiResponseOp)
 def handle_ai_response(val: AiResponseOp, ctx: OpContext) -> None:
     ctx.wf.send_val = None
-    ctx.new_events.append(Event(
-        event_id=0,
-        execution_id=ctx.execution_id,
-        workflow_id=ctx.workflow_id,
-        category='outbox',
-        payload=ev.AiResponseEvent(text=val.text, meta=val.meta),
-    ))
+    ctx.new_events.append(
+        Event(
+            event_id=0,
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            category="outbox",
+            payload=ev.AiResponseEvent(text=val.text, meta=val.meta),
+        )
+    )

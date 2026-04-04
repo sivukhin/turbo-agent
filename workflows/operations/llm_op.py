@@ -27,13 +27,15 @@ def handle_ai(val: AiOp, ctx: OpContext) -> None:
             meta=val.meta,
         )
     else:
-        raise RuntimeError('AiOp requires messages or conversation')
+        raise RuntimeError("AiOp requires messages or conversation")
 
-    ctx.wf.status = 'waiting'
-    ctx.new_events.append(Event(
-        event_id=0,
-        execution_id=ctx.execution_id,
-        workflow_id=ctx.workflow_id,
-        category='outbox',
-        payload=payload,
-    ))
+    ctx.wf.status = "waiting"
+    ctx.new_events.append(
+        Event(
+            event_id=0,
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            category="outbox",
+            payload=payload,
+        )
+    )

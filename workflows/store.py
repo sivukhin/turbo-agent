@@ -72,7 +72,6 @@ class Store:
         state: ExecutionState,
         last_processed_event_id: int | None = None,
     ):
-
         cur = self.conn.cursor()
         cur.execute(
             "SELECT last_processed_event_id, created_at FROM executions WHERE execution_id = ?",
@@ -225,7 +224,6 @@ class Store:
         meta: dict | None = None,
         event_time: int = 0,
     ) -> MessageRef:
-
         if not isinstance(content, str):
             content = json.dumps(content)
         message_id = new_id()

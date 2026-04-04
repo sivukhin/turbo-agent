@@ -28,58 +28,60 @@ from workflows.models.state import (  # noqa: F401
 # ---- Yield functions ----
 
 
-def wait(handle) -> WaitOp:
-    return WaitOp(deps=[handle.id], mode='wait')
+def wait(handle, meta=None) -> WaitOp:
+    return WaitOp(deps=[handle.id], mode='wait', meta=meta or {})
 
 
-def wait_all(handles) -> WaitOp:
-    return WaitOp(deps=[h.id for h in handles], mode='wait_all')
+def wait_all(handles, meta=None) -> WaitOp:
+    return WaitOp(deps=[h.id for h in handles], mode='wait_all', meta=meta or {})
 
 
-def wait_any(handles) -> WaitOp:
-    return WaitOp(deps=[h.id for h in handles], mode='wait_any')
+def wait_any(handles, meta=None) -> WaitOp:
+    return WaitOp(deps=[h.id for h in handles], mode='wait_any', meta=meta or {})
 
 
-def sleep(seconds: float) -> SleepOp:
-    return SleepOp(seconds=seconds)
+def sleep(seconds: float, meta=None) -> SleepOp:
+    return SleepOp(seconds=seconds, meta=meta or {})
 
 
-def shell(command: str, isolation: Isolation, public_env=None, private_env=None) -> ShellOp:
+def shell(command: str, isolation: Isolation, public_env=None, private_env=None, meta=None) -> ShellOp:
     return ShellOp(
         command=command,
         isolation=isolation,
         public_env=public_env,
         private_env=private_env,
+        meta=meta or {},
     )
 
 
-def shell_stream_start(command: str, isolation: Isolation, public_env=None, private_env=None) -> ShellStreamStartOp:
+def shell_stream_start(command: str, isolation: Isolation, public_env=None, private_env=None, meta=None) -> ShellStreamStartOp:
     return ShellStreamStartOp(
         command=command,
         isolation=isolation,
         public_env=public_env,
         private_env=private_env,
+        meta=meta or {},
     )
 
 
-def shell_stream_next(stream_id: str, private_env=None) -> ShellStreamNextOp:
-    return ShellStreamNextOp(stream_id=stream_id, private_env=private_env)
+def shell_stream_next(stream_id: str, private_env=None, meta=None) -> ShellStreamNextOp:
+    return ShellStreamNextOp(stream_id=stream_id, private_env=private_env, meta=meta or {})
 
 
-def read_file(path: str) -> ReadFileOp:
-    return ReadFileOp(path=path)
+def read_file(path: str, meta=None) -> ReadFileOp:
+    return ReadFileOp(path=path, meta=meta or {})
 
 
-def write_file(path: str, content: str) -> WriteFileOp:
-    return WriteFileOp(path=path, content=content)
+def write_file(path: str, content: str, meta=None) -> WriteFileOp:
+    return WriteFileOp(path=path, content=content, meta=meta or {})
 
 
-def user_prompt() -> UserPromptOp:
-    return UserPromptOp()
+def user_prompt(meta=None) -> UserPromptOp:
+    return UserPromptOp(meta=meta or {})
 
 
-def ai_response(text: str) -> AiResponseOp:
-    return AiResponseOp(text=text)
+def ai_response(text: str, meta=None) -> AiResponseOp:
+    return AiResponseOp(text=text, meta=meta or {})
 
 
 def ai(
@@ -91,6 +93,7 @@ def ai(
     temperature=0.0,
     system=None,
     tools=None,
+    meta=None,
 ) -> AiOp:
     return AiOp(
         messages=messages,
@@ -100,4 +103,5 @@ def ai(
         temperature=temperature,
         system=system,
         tools=tools,
+        meta=meta or {},
     )

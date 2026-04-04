@@ -13,7 +13,7 @@ def handle_user_prompt(val: UserPromptOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.UserPromptRequest(request_id=request_id),
+        payload=ev.UserPromptRequest(request_id=request_id, meta=val.meta),
     ))
 
 
@@ -25,5 +25,5 @@ def handle_ai_response(val: AiResponseOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.AiResponseEvent(text=val.text),
+        payload=ev.AiResponseEvent(text=val.text, meta=val.meta),
     ))

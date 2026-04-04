@@ -18,11 +18,13 @@ class ChatMessage(TypedDict, total=False):
 class WaitOp:
     deps: list[str]
     mode: Literal["wait", "wait_all", "wait_any"]
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class SleepOp:
     seconds: float
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -31,6 +33,7 @@ class ShellOp:
     isolation: Isolation
     public_env: dict[str, str] | None = None
     private_env: dict[str, str] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -39,33 +42,38 @@ class ShellStreamStartOp:
     isolation: Isolation
     public_env: dict[str, str] | None = None
     private_env: dict[str, str] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class ShellStreamNextOp:
     stream_id: str
     private_env: dict[str, str] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class ReadFileOp:
     path: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class WriteFileOp:
     path: str
     content: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class UserPromptOp:
-    pass
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class AiResponseOp:
     text: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -77,6 +85,7 @@ class AiOp:
     temperature: float = 0.0
     system: str | None = None
     tools: list[dict] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -95,6 +104,7 @@ class ConvListOp:
     end_message_id: str | None = None
     role_filter: str | None = None
     pattern: str | None = None  # LIKE pattern on content
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -102,6 +112,7 @@ class ConvReadOp:
     """Read messages by refs. Returns [Message]."""
 
     refs: list[MessageRef]
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -109,3 +120,4 @@ class ConvReplaceWithOp:
     new_messages: list[ChatMessage]
     start_ref: MessageRef | None = None
     end_ref: MessageRef | None = None
+    meta: dict = field(default_factory=dict)

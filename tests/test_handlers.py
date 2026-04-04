@@ -1,6 +1,7 @@
 """Unit tests for handler implementations."""
 
 from workflows.handlers import WaitHandler, WaitAllHandler, WaitAnyHandler, SleepHandler
+from workflows.models.handler_state import WaitState, WaitAllState, WaitAnyState, SleepState
 from workflows.events import WorkflowFinished
 
 
@@ -15,21 +16,21 @@ class MockWf:
 class TestWaitHandler:
     def test_initial_state(self):
         state = WaitHandler.initial_state(["dep-1"])
-        assert state == {"dep": "dep-1", "result": None, "resolved": False}
+        assert state == WaitState(dep="dep-1")
 
     def test_ignores_unrelated_messages(self):
         state = WaitHandler.initial_state(["dep-1"])
         state = WaitHandler.on_event(
             "workflow_finished", "dep-2", WorkflowFinished(result=99), state
         )
-        assert not state["resolved"]
+        assert not state.resolved
 
     def test_resolves_on_matching_finish(self):
         state = WaitHandler.initial_state(["dep-1"])
         state = WaitHandler.on_event(
             "workflow_finished", "dep-1", WorkflowFinished(result=42), state
         )
-        assert state["resolved"]
+        assert state.resolved
         wf = MockWf()
         assert WaitHandler.resolve(state, wf, 0)
         assert wf.status == "running"
@@ -38,7 +39,7 @@ class TestWaitHandler:
     def test_ignores_tick_messages(self):
         state = WaitHandler.initial_state(["dep-1"])
         state = WaitHandler.on_event("tick", None, {}, state)
-        assert not state["resolved"]
+        assert not state.resolved
 
     def test_not_resolved_initially(self):
         state = WaitHandler.initial_state(["dep-1"])
@@ -50,8 +51,8 @@ class TestWaitHandler:
 class TestWaitAllHandler:
     def test_initial_state(self):
         state = WaitAllHandler.initial_state(["a", "b", "c"])
-        assert state["deps"] == ["a", "b", "c"]
-        assert state["results"] == {}
+        assert state.deps == ["a", "b", "c"]
+        assert state.results == {}
 
     def test_collects_results(self):
         state = WaitAllHandler.initial_state(["a", "b"])
@@ -109,8 +110,8 @@ class TestWaitAllHandler:
 class TestWaitAnyHandler:
     def test_initial_state(self):
         state = WaitAnyHandler.initial_state(["a", "b", "c"])
-        assert state["deps"] == ["a", "b", "c"]
-        assert state["results"] == {}
+        assert state.deps == ["a", "b", "c"]
+        assert state.results == {}
 
     def test_resolves_on_first_finish(self):
         state = WaitAnyHandler.initial_state(["a", "b", "c"])
@@ -150,7 +151,7 @@ class TestWaitAnyHandler:
 class TestSleepHandler:
     def test_initial_state(self):
         state = SleepHandler.initial_state(1000.0)
-        assert state == {"wake_at": 1000.0}
+        assert state == SleepState(wake_at=1000.0)
 
     def test_not_resolved_before_wake(self):
         state = SleepHandler.initial_state(1000.0)

@@ -32,5 +32,6 @@ def handle_shell(val: ShellOp, ctx: OpContext) -> None:
             isolation_type=iso_type,
             isolation_config=iso_config,
             public_env=val.public_env,
+            meta=val.meta,
         ),
     ))

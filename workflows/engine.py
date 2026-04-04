@@ -230,16 +230,17 @@ class Engine:
             if handler_cls.resolve(hs.state, wf, now):
                 del state.handlers[handler_wf_id]
             # Collect any events the handler wants to emit
-            for evt_payload in hs.state.pop("_emit_events", []):
-                new_events.append(
-                    Event(
+            emit_events = getattr(hs.state, 'emit_events', None)
+            if emit_events:
+                for evt_payload in emit_events:
+                    new_events.append(Event(
                         event_id=0,
                         execution_id=execution_id,
                         workflow_id=handler_wf_id,
-                        category="inbox",
+                        category='inbox',
                         payload=evt_payload,
-                    )
-                )
+                    ))
+                emit_events.clear()
         return new_events
 
     def _check_finished(self, state):
@@ -322,7 +323,7 @@ class Engine:
                     execution_id=execution_id,
                     workflow_id=workflow_id,
                     category="outbox",
-                    payload=ev.WorkflowYielded(value=val),
+                    payload=ev.WorkflowYielded(value=val, meta=getattr(val, 'meta', {})),
                 )
             )
 

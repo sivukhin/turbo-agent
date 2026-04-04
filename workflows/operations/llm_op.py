@@ -14,6 +14,7 @@ def handle_ai(val: AiOp, ctx: OpContext) -> None:
             system=val.system,
             tools=val.tools,
             conversation_ref=conv_ref,
+            meta=val.meta,
         )
     elif val.messages:
         payload = ev.LlmRequest(
@@ -23,6 +24,7 @@ def handle_ai(val: AiOp, ctx: OpContext) -> None:
             system=val.system,
             tools=val.tools,
             messages=val.messages,
+            meta=val.meta,
         )
     else:
         raise RuntimeError('AiOp requires messages or conversation')

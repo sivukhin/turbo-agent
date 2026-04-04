@@ -136,10 +136,11 @@ class ShellStreamNextRequestHandler:
 
         # Register a poll handler that will deliver the next line via resolve()
         from workflows.ops import HandlerState
+        from workflows.models.handler_state import StreamNextState
 
         state.handlers[event.workflow_id] = HandlerState(
             handler_type="stream_next",
-            state={"stream_id": stream_id},
+            state=StreamNextState(stream_id=stream_id),
         )
 
         return []

@@ -70,6 +70,17 @@ def stream_all():
     return {"stdout": stdout, "stderr": stderr, "exit_code": line.exit_code}
 
 
+@workflow
+def stream_with_meta():
+    stream = yield shell_stream_start(
+        'echo "hello"', isolation=HostIsolation(), meta={'source': 'test'}
+    )
+    line = yield shell_stream_next(stream)
+    while not line.finished:
+        line = yield shell_stream_next(stream)
+    return 'done'
+
+
 @pytest.fixture
 def engine_and_store():
     fd, path = tempfile.mkstemp(suffix=".db")
@@ -80,6 +91,7 @@ def engine_and_store():
         "stream_exit_code": stream_exit_code,
         "stream_stderr": stream_stderr,
         "stream_all": stream_all,
+        "stream_with_meta": stream_with_meta,
     }
     engine = Engine(EngineConfig(workflows_registry=registry))
     yield engine, store
@@ -144,3 +156,18 @@ class TestShellStream:
         # stderr is buffered and delivered with the sentinel
         root = state.workflows[state.root_workflow_id]
         assert len(root.result) > 0
+
+    def test_stream_next_inherits_meta(self, engine_and_store):
+        """ShellStreamNextRequest should inherit meta from the start operation."""
+        engine, store = engine_and_store
+        eid = engine.start(store, "stream_with_meta", [], workdir=tempfile.mkdtemp())
+        state = _run_to_completion(engine, store, eid)
+        outbox = store.read_outbox(eid)
+        from workflows.events import ShellStreamStartRequest, ShellStreamNextRequest
+        start_events = [e for e in outbox if isinstance(e.payload, ShellStreamStartRequest)]
+        next_events = [e for e in outbox if isinstance(e.payload, ShellStreamNextRequest)]
+        assert len(start_events) >= 1
+        assert start_events[0].payload.meta == {'source': 'test'}
+        assert len(next_events) >= 1
+        for e in next_events:
+            assert e.payload.meta.get('source') == 'test'

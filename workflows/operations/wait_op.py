@@ -16,5 +16,5 @@ def handle_wait(val: WaitOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.WaitStarted(mode=val.mode, deps=val.deps),
+        payload=ev.WaitStarted(mode=val.mode, deps=val.deps, meta=val.meta),
     ))

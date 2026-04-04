@@ -69,7 +69,7 @@ class WorkflowState:
 @dataclass
 class HandlerState:
     handler_type: str
-    state: dict
+    state: object
 
 
 @dataclass
@@ -83,6 +83,7 @@ class StreamDef:
     isolation_config: DockerIsolation | None
     public_env: dict[str, str] | None
     workflow_id: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass

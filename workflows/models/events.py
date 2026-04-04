@@ -11,6 +11,7 @@ from workflows.models.operations import ChatMessage
 @dataclass
 class WorkflowYielded:
     value: object
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -24,6 +25,7 @@ class ShellRequest:
     isolation_type: Literal["host", "docker"] = "host"
     isolation_config: DockerIsolation | None = None
     public_env: dict[str, str] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -41,6 +43,7 @@ class ShellStreamStartRequest:
     isolation_type: Literal["host", "docker"] = "host"
     isolation_config: DockerIsolation | None = None
     public_env: dict[str, str] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -51,6 +54,7 @@ class ShellStreamStartResult:
 @dataclass
 class ShellStreamNextRequest:
     stream_id: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -65,6 +69,7 @@ class ShellStreamLine:
 @dataclass
 class FileReadRequest:
     path: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -77,6 +82,7 @@ class FileReadResult:
 class FileWriteRequest:
     path: str
     content: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -89,12 +95,14 @@ class FileWriteResult:
 class WaitStarted:
     mode: Literal["wait", "wait_all", "wait_any"]
     deps: list[str]
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class SleepStarted:
     seconds: float
     wake_at: float
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -117,26 +125,27 @@ class LlmRequest:
     system: str | None = None
     tools: list[dict] | None = None
     conversation_ref: ConversationRef | None = None
-
     messages: list[ChatMessage] | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
 class LlmResponse:
     """Response from an LLM."""
 
-    content: list[dict]  # [{"type": "text", "text": str} | {"type": "tool_use", ...}]
+    content: list[dict]
     model: str
     stop_reason: Literal["end_turn", "tool_use", "max_tokens", "stop_sequence"] | None
-    usage: dict | None  # {"input_tokens": int, "output_tokens": int}
-    text: str = ""  # concatenated text from text blocks
-    tool_calls: list[dict] | None = None  # [{"id": str, "name": str, "input": dict}]
+    usage: dict | None
+    text: str = ""
+    tool_calls: list[dict] | None = None
     message_id: str | None = None
 
 
 @dataclass
 class UserPromptRequest:
     request_id: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -148,6 +157,7 @@ class UserPromptResult:
 @dataclass
 class AiResponseEvent:
     text: str
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -175,6 +185,7 @@ class ConvListRequest:
     start_message_id: str | None = None
     role_filter: str | None = None
     pattern: str | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -186,6 +197,7 @@ class ConvListResult:
 @dataclass
 class ConvReadRequest:
     message_refs: list[MessageRef]
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -199,6 +211,7 @@ class ConvReplaceWithRequest:
     new_messages: list[ChatMessage]
     start_message_id: str | None
     end_message_id: str | None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass

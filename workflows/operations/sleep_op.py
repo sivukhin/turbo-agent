@@ -17,5 +17,5 @@ def handle_sleep(val: SleepOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.SleepStarted(seconds=val.seconds, wake_at=wake_at),
+        payload=ev.SleepStarted(seconds=val.seconds, wake_at=wake_at, meta=val.meta),
     ))

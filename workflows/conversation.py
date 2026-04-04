@@ -51,6 +51,7 @@ def conv_list(
     end_message_id=None,
     role_filter=None,
     pattern=None,
+    meta=None,
 ) -> ConvListOp:
     return ConvListOp(
         conversation=conversation,
@@ -58,16 +59,18 @@ def conv_list(
         end_message_id=end_message_id,
         role_filter=role_filter,
         pattern=pattern,
+        meta=meta or {},
     )
 
 
-def conv_read(refs: list[MessageRef]) -> ConvReadOp:
-    return ConvReadOp(refs=refs)
+def conv_read(refs: list[MessageRef], meta=None) -> ConvReadOp:
+    return ConvReadOp(refs=refs, meta=meta or {})
 
 
-def conv_replace_with(new_messages, start_ref=None, end_ref=None) -> ConvReplaceWithOp:
+def conv_replace_with(new_messages, start_ref=None, end_ref=None, meta=None) -> ConvReplaceWithOp:
     return ConvReplaceWithOp(
         new_messages=new_messages,
         start_ref=start_ref,
         end_ref=end_ref,
+        meta=meta or {},
     )

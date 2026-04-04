@@ -22,6 +22,7 @@ def handle_shell_stream_start(val: ShellStreamStartOp, ctx: OpContext) -> None:
         isolation_config=iso_config,
         public_env=val.public_env,
         workflow_id=ctx.workflow_id,
+        meta=val.meta,
     )
 
     if val.private_env:
@@ -39,6 +40,7 @@ def handle_shell_stream_start(val: ShellStreamStartOp, ctx: OpContext) -> None:
             isolation_type=iso_type,
             isolation_config=iso_config,
             public_env=val.public_env,
+            meta=val.meta,
         ),
     ))
 
@@ -47,11 +49,14 @@ def handle_shell_stream_start(val: ShellStreamStartOp, ctx: OpContext) -> None:
 def handle_shell_stream_next(val: ShellStreamNextOp, ctx: OpContext) -> None:
     if val.private_env:
         _stream_private_envs[val.stream_id] = val.private_env
+    # Inherit meta from the stream's start operation
+    stream_def = ctx.state.streams.get(val.stream_id)
+    meta = {**(stream_def.meta if stream_def else {}), **val.meta}
     ctx.wf.status = 'waiting'
     ctx.new_events.append(Event(
         event_id=0,
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.ShellStreamNextRequest(stream_id=val.stream_id),
+        payload=ev.ShellStreamNextRequest(stream_id=val.stream_id, meta=meta),
     ))

@@ -13,7 +13,7 @@ def handle_read_file(val: ReadFileOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.FileReadRequest(path=val.path),
+        payload=ev.FileReadRequest(path=val.path, meta=val.meta),
     ))
 
 
@@ -27,5 +27,5 @@ def handle_write_file(val: WriteFileOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.FileWriteRequest(path=val.path, content=val.content),
+        payload=ev.FileWriteRequest(path=val.path, content=val.content, meta=val.meta),
     ))

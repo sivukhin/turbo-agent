@@ -41,6 +41,7 @@ def handle_conv_list(val: ConvListOp, ctx: OpContext) -> None:
             start_message_id=val.start_message_id,
             role_filter=val.role_filter,
             pattern=val.pattern,
+            meta=val.meta,
         ),
     ))
 
@@ -55,7 +56,7 @@ def handle_conv_read(val: ConvReadOp, ctx: OpContext) -> None:
         execution_id=ctx.execution_id,
         workflow_id=ctx.workflow_id,
         category='outbox',
-        payload=ev.ConvReadRequest(message_refs=val.refs),
+        payload=ev.ConvReadRequest(message_refs=val.refs, meta=val.meta),
     ))
 
 
@@ -76,5 +77,6 @@ def handle_conv_replace_with(val: ConvReplaceWithOp, ctx: OpContext) -> None:
             new_messages=val.new_messages,
             start_message_id=start_id,
             end_message_id=end_id,
+            meta=val.meta,
         ),
     ))

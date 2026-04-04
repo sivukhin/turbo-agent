@@ -5,6 +5,7 @@ from typing import Protocol
 @dataclass
 class ToolCall:
     """A parsed tool call from the LLM response."""
+
     id: str
     name: str
     input: dict
@@ -13,12 +14,13 @@ class ToolCall:
 @dataclass
 class LlmResult:
     """Provider-agnostic LLM result."""
-    content: list                       # raw content blocks
+
+    content: list  # raw content blocks
     model: str
     stop_reason: str | None
-    usage: dict | None                  # {"input_tokens": int, "output_tokens": int, ...}
+    usage: dict | None  # {"input_tokens": int, "output_tokens": int, ...}
     tool_calls: list[ToolCall] = field(default_factory=list)
-    text: str = ''                      # concatenated text from all text blocks
+    text: str = ""  # concatenated text from all text blocks
     message_id: str | None = None
 
 

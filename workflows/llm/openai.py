@@ -9,6 +9,7 @@ from workflows.llm.base import LlmResult, ToolCall
 @dataclass
 class OpenAIProvider:
     """LLM provider using the OpenAI API."""
+
     api_key: str | None = None  # uses OPENAI_API_KEY env var if None
     base_url: str | None = None
 
@@ -25,26 +26,26 @@ class OpenAIProvider:
 
         msgs = list(messages)
         if system:
-            msgs = [{'role': 'system', 'content': system}] + msgs
+            msgs = [{"role": "system", "content": system}] + msgs
 
         kwargs = {
-            'model': model,
-            'messages': msgs,
-            'temperature': temperature,
+            "model": model,
+            "messages": msgs,
+            "temperature": temperature,
         }
 
         if max_tokens is not None:
-            kwargs['max_tokens'] = max_tokens
+            kwargs["max_tokens"] = max_tokens
 
         if tools:
-            kwargs['tools'] = [
+            kwargs["tools"] = [
                 {
-                    'type': 'function',
-                    'function': {
-                        'name': t['name'],
-                        'description': t.get('description', ''),
-                        'parameters': t.get('input_schema', t.get('parameters', {})),
-                    }
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("input_schema", t.get("parameters", {})),
+                    },
                 }
                 for t in tools
             ]
@@ -58,31 +59,38 @@ class OpenAIProvider:
         text_parts = []
 
         if msg.content:
-            content.append({'type': 'text', 'text': msg.content})
+            content.append({"type": "text", "text": msg.content})
             text_parts.append(msg.content)
 
         if msg.tool_calls:
             for tc in msg.tool_calls:
-                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                content.append({
-                    'type': 'tool_use',
-                    'id': tc.id,
-                    'name': tc.function.name,
-                    'input': args,
-                })
-                tool_calls.append(ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    input=args,
-                ))
+                args = (
+                    json.loads(tc.function.arguments) if tc.function.arguments else {}
+                )
+                content.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "input": args,
+                    }
+                )
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        input=args,
+                    )
+                )
 
         usage = None
         if response.usage:
             usage = {
-                'input_tokens': response.usage.prompt_tokens,
-                'output_tokens': response.usage.completion_tokens,
-                'cached_tokens': getattr(response.usage, 'prompt_tokens_details', None)
-                    and getattr(response.usage.prompt_tokens_details, 'cached_tokens', 0) or 0,
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+                "cached_tokens": getattr(response.usage, "prompt_tokens_details", None)
+                and getattr(response.usage.prompt_tokens_details, "cached_tokens", 0)
+                or 0,
             }
 
         return LlmResult(
@@ -91,6 +99,6 @@ class OpenAIProvider:
             stop_reason=choice.finish_reason,
             usage=usage,
             tool_calls=tool_calls,
-            text='\n'.join(text_parts),
+            text="\n".join(text_parts),
             message_id=response.id,
         )

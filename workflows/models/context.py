@@ -10,6 +10,7 @@ from workflows.store import Store
 @dataclass
 class OpContext:
     """Context passed to operation handlers."""
+
     execution_id: str
     workflow_id: str
     wf: WorkflowState

@@ -8,11 +8,13 @@ from workflows import workflow
 
 # ---- test workflows ----
 
+
 @workflow
 def counter(n):
     for i in range(n):
         yield i
     return n
+
 
 @workflow
 def nested_loops(n, m):
@@ -20,6 +22,7 @@ def nested_loops(n, m):
         for j in range(m):
             yield i * m + j
     return n * m
+
 
 @workflow
 def accumulator_send(n):
@@ -29,6 +32,7 @@ def accumulator_send(n):
         total += x + i
     return total
 
+
 @workflow
 def expr_yield():
     a = 1
@@ -37,20 +41,23 @@ def expr_yield():
     yield c
     return c
 
+
 @workflow
 def conditional(n):
     for i in range(n):
         if i % 2 == 0:
-            yield ('even', i)
+            yield ("even", i)
         else:
-            yield ('odd', i)
+            yield ("odd", i)
     return n
+
 
 @workflow
 def nested_expr():
     result = (yield 10) + (yield 20) + (yield 30)
     yield result
     return result
+
 
 @workflow
 def triple_nested(a, b, c):
@@ -61,6 +68,7 @@ def triple_nested(a, b, c):
                 total += 1
                 yield total
     return total
+
 
 @workflow
 def break_continue(n):
@@ -73,6 +81,7 @@ def break_continue(n):
         yield i
         collected.append(i)
     return collected
+
 
 @workflow
 def while_loop(n):
@@ -141,6 +150,7 @@ def collect_with_resume_at(wf_func, args, resume_at, send_values=None):
 
 
 # ---- parametrized differential tests ----
+
 
 class TestDifferentialCounter:
     @pytest.mark.parametrize("n", [1, 2, 5, 10, 20])
@@ -276,10 +286,10 @@ class TestDifferentialPickleRoundtrip:
             data = g.save()
 
             # Triple pickle roundtrip
-            cp = pickle.loads(pickle.dumps(pickle.loads(pickle.dumps(
-                pickle.loads(data)
-            ))))
+            cp = pickle.loads(
+                pickle.dumps(pickle.loads(pickle.dumps(pickle.loads(data))))
+            )
             g2 = nested_loops.resume(cp)
             after = list(g2)
-            combined = baseline_vals[:resume_at + 1] + after
+            combined = baseline_vals[: resume_at + 1] + after
             assert combined == baseline_vals

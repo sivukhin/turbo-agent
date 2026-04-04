@@ -30,6 +30,6 @@ def collect_workflows(module) -> dict:
     workflows = {}
     for name in dir(module):
         obj = getattr(module, name)
-        if callable(obj) and hasattr(obj, 'create') and hasattr(obj, 'resume'):
+        if callable(obj) and hasattr(obj, "create") and hasattr(obj, "resume"):
             workflows[name] = obj
     return workflows

@@ -16,19 +16,19 @@ def accumulator(n):
 def double_accumulate(n):
     a = accumulator(n)
     b = accumulator(n)
-    yield 'both started'
+    yield "both started"
     first, second = yield wait_all([a, b])
-    yield f'results: {first}, {second}'
+    yield f"results: {first}, {second}"
     return first + second
 
 
 @workflow
 def race(n):
     children = [accumulator(i + 1) for i in range(n)]
-    yield f'racing {n} children'
+    yield f"racing {n} children"
     results = yield wait_any(children)
     finished = [(i, r) for i, (done, r) in enumerate(results) if done]
-    yield f'finished: {finished}'
+    yield f"finished: {finished}"
     return results
 
 
@@ -37,23 +37,23 @@ def pipeline(steps):
     children = []
     for i in range(steps):
         children.append(accumulator(i + 1))
-    yield f'launched {steps} children'
+    yield f"launched {steps} children"
     results = []
     for i, child in enumerate(children):
         result = yield wait(child)
         results.append(result)
-        yield f'stage {i} done: {result}'
+        yield f"stage {i} done: {result}"
     return sum(results)
 
 
 @workflow
 def sleepy():
-    yield 'starting'
+    yield "starting"
     yield sleep(5)
-    yield 'woke up'
+    yield "woke up"
     child = accumulator(2)
     result = yield wait(child)
-    yield f'done: {result}'
+    yield f"done: {result}"
     return result
 
 
@@ -62,17 +62,17 @@ def worker(name, n):
     total = 0
     for i in range(n):
         total += i
-        yield f'{name}: step {i}, total={total}'
+        yield f"{name}: step {i}, total={total}"
     return total
 
 
 @workflow
 def supervisor(n):
     """Spawns workers, each supervised by a sub-supervisor."""
-    workers = [worker(f'w{i}', i + 1) for i in range(n)]
-    yield f'supervisor: launched {n} workers'
+    workers = [worker(f"w{i}", i + 1) for i in range(n)]
+    yield f"supervisor: launched {n} workers"
     results = yield wait_all(workers)
-    yield f'supervisor: all done, results={results}'
+    yield f"supervisor: all done, results={results}"
     return sum(results)
 
 
@@ -88,7 +88,7 @@ def deep_chain(depth):
     children = []
     for i in range(depth):
         children.append(supervisor(i + 1))
-    yield f'deep_chain: launched {depth} supervisors'
+    yield f"deep_chain: launched {depth} supervisors"
     results = yield wait_all(children)
-    yield f'deep_chain: supervisor results={results}'
+    yield f"deep_chain: supervisor results={results}"
     return sum(results)

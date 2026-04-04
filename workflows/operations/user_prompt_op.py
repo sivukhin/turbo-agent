@@ -9,14 +9,16 @@ class UserPromptOpHandler:
     @staticmethod
     def handle(val: UserPromptOp, ctx: OpContext) -> None:
         request_id = new_id()
-        ctx.wf.status = 'waiting'
-        ctx.new_events.append(Event(
-            event_id=0, 
-            execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, 
-            category='outbox',
-            payload=ev.UserPromptRequest(request_id=request_id),
-        ))
+        ctx.wf.status = "waiting"
+        ctx.new_events.append(
+            Event(
+                event_id=0,
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                category="outbox",
+                payload=ev.UserPromptRequest(request_id=request_id),
+            )
+        )
 
 
 @op_handler(AiResponseOp)
@@ -24,10 +26,12 @@ class AiResponseOpHandler:
     @staticmethod
     def handle(val: AiResponseOp, ctx: OpContext) -> None:
         ctx.wf.send_val = None
-        ctx.new_events.append(Event(
-            event_id=0, 
-            execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, 
-            category='outbox',
-            payload=ev.AiResponseEvent(text=val.text),
-        ))
+        ctx.new_events.append(
+            Event(
+                event_id=0,
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                category="outbox",
+                payload=ev.AiResponseEvent(text=val.text),
+            )
+        )

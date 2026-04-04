@@ -11,19 +11,34 @@ from dataclasses import fields, asdict, is_dataclass
 from workflows.models.state import _to_snake
 
 from workflows.models.events import (  # noqa: F401
-    WorkflowYielded, WorkflowFinished,
-    ShellRequest, ShellResult,
-    ShellStreamStartRequest, ShellStreamStartResult, ShellStreamNextRequest, ShellStreamLine,
-    FileReadRequest, FileReadResult,
-    FileWriteRequest, FileWriteResult,
-    WaitStarted, SleepStarted,
+    WorkflowYielded,
+    WorkflowFinished,
+    ShellRequest,
+    ShellResult,
+    ShellStreamStartRequest,
+    ShellStreamStartResult,
+    ShellStreamNextRequest,
+    ShellStreamLine,
+    FileReadRequest,
+    FileReadResult,
+    FileWriteRequest,
+    FileWriteResult,
+    WaitStarted,
+    SleepStarted,
     WorkflowSpawned,
-    LlmRequest, LlmResponse,
-    UserPromptRequest, UserPromptResult, AiResponseEvent,
-    ConvAppendRequest, ConvAppendResult,
-    ConvListRequest, ConvListResult,
-    ConvReadRequest, ConvReadResult,
-    ConvReplaceWithRequest, ConvReplaceWithResult,
+    LlmRequest,
+    LlmResponse,
+    UserPromptRequest,
+    UserPromptResult,
+    AiResponseEvent,
+    ConvAppendRequest,
+    ConvAppendResult,
+    ConvListRequest,
+    ConvListResult,
+    ConvReadRequest,
+    ConvReadResult,
+    ConvReplaceWithRequest,
+    ConvReplaceWithResult,
 )
 
 
@@ -73,10 +88,11 @@ def payload_type_name(payload) -> str:
 
 # ---- serialization ----
 
+
 def serialize_payload(payload) -> str:
     """Serialize a payload dataclass to JSON with _type discriminator."""
     data = asdict(payload)
-    data['_type'] = payload_type_name(payload)
+    data["_type"] = payload_type_name(payload)
     return json.dumps(data, default=str)
 
 
@@ -94,7 +110,7 @@ def _reconstruct(tp, val):
     tp = _unwrap_optional(tp)
     if isinstance(val, dict) and is_dataclass(tp):
         return tp(**val)
-    if isinstance(val, list) and hasattr(tp, '__args__'):
+    if isinstance(val, list) and hasattr(tp, "__args__"):
         item_tp = tp.__args__[0] if tp.__args__ else None
         if item_tp and is_dataclass(item_tp):
             return [item_tp(**v) if isinstance(v, dict) else v for v in val]
@@ -104,10 +120,10 @@ def _reconstruct(tp, val):
 def deserialize_payload(json_str: str):
     """Deserialize JSON with _type discriminator back to a payload dataclass."""
     data = json.loads(json_str)
-    type_name = data.pop('_type')
+    type_name = data.pop("_type")
     cls = PAYLOAD_REGISTRY.get(type_name)
     if cls is None:
-        raise ValueError(f'Unknown payload type: {type_name}')
+        raise ValueError(f"Unknown payload type: {type_name}")
     filtered = {}
     for f in fields(cls):
         if f.name not in data:

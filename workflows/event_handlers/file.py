@@ -1,5 +1,9 @@
 from pathlib import Path
-from workflows.event_handlers.base import resolve_wf, make_inbox_event, register_event_handler
+from workflows.event_handlers.base import (
+    resolve_wf,
+    make_inbox_event,
+    register_event_handler,
+)
 import workflows.events as ev
 
 
@@ -12,9 +16,15 @@ class FileReadRequestHandler:
             return []
         content = (Path(wf.workdir) / payload.path).read_text()
         resolve_wf(state, event.workflow_id, content)
-        return [make_inbox_event(event, ev.FileReadResult(
-            path=payload.path, content=content,
-        ))]
+        return [
+            make_inbox_event(
+                event,
+                ev.FileReadResult(
+                    path=payload.path,
+                    content=content,
+                ),
+            )
+        ]
 
 
 @register_event_handler(ev.FileWriteRequest)
@@ -28,6 +38,12 @@ class FileWriteRequestHandler:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(payload.content)
         resolve_wf(state, event.workflow_id, None)
-        return [make_inbox_event(event, ev.FileWriteResult(
-            path=payload.path, size=len(payload.content),
-        ))]
+        return [
+            make_inbox_event(
+                event,
+                ev.FileWriteResult(
+                    path=payload.path,
+                    size=len(payload.content),
+                ),
+            )
+        ]

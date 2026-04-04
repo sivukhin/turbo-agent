@@ -5,7 +5,11 @@ import queue
 from pathlib import Path
 from workflows.isolation.host import HostIsolation
 from workflows.isolation.docker import DockerIsolation
-from workflows.event_handlers.base import resolve_wf, make_inbox_event, register_event_handler
+from workflows.event_handlers.base import (
+    resolve_wf,
+    make_inbox_event,
+    register_event_handler,
+)
 import workflows.events as ev
 
 
@@ -16,20 +20,24 @@ _streams_lock = threading.Lock()
 
 
 def _build_cmd(iso_type, iso_config, workdir, command, env):
-    if iso_type == 'docker':
+    if iso_type == "docker":
         iso = iso_config or DockerIsolation()
         cmd = [
-            'docker', 'run', '--rm',
-            f'--network={iso.network}',
-            '-v', f'{workdir.resolve()}:/workspace',
-            '-w', '/workspace',
+            "docker",
+            "run",
+            "--rm",
+            f"--network={iso.network}",
+            "-v",
+            f"{workdir.resolve()}:/workspace",
+            "-w",
+            "/workspace",
         ]
         for k, v in (env or {}).items():
-            cmd.extend(['-e', f'{k}={v}'])
-        cmd.extend([iso.image, 'sh', '-c', command])
+            cmd.extend(["-e", f"{k}={v}"])
+        cmd.extend([iso.image, "sh", "-c", command])
         return cmd, {}
     else:
-        return ['sh', '-c', command], {'cwd': str(workdir), 'env': env or None}
+        return ["sh", "-c", command], {"cwd": str(workdir), "env": env or None}
 
 
 def _stream_worker(proc, q):
@@ -38,7 +46,7 @@ def _stream_worker(proc, q):
 
     def read_stderr():
         for line in proc.stderr:
-            stderr_lines.append(line.rstrip('\n'))
+            stderr_lines.append(line.rstrip("\n"))
 
     t = threading.Thread(target=read_stderr, daemon=True)
     t.start()
@@ -46,7 +54,7 @@ def _stream_worker(proc, q):
         line = proc.stdout.readline()
         if not line:
             break
-        q.put(([line.rstrip('\n')], []))
+        q.put(([line.rstrip("\n")], []))
     t.join()
     exit_code = proc.wait()
     q.put(([], stderr_lines, exit_code))
@@ -59,7 +67,10 @@ def _ensure_stream(stream_id, command, iso_type, iso_config, env, workdir):
             return
         cmd, kwargs = _build_cmd(iso_type, iso_config, workdir, command, env)
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             start_new_session=True,  # equivalent to Setpgid: isolate from parent signals
             **kwargs,
         )
@@ -77,16 +88,24 @@ class ShellStreamStartRequestHandler:
             return []
 
         from workflows.operations.shell_stream_op import _stream_private_envs
+
         private_env = _stream_private_envs.get(payload.stream_id, {})
         merged_env = {**(payload.public_env or {}), **private_env}
         _ensure_stream(
-            payload.stream_id, payload.command,
-            payload.isolation_type, payload.isolation_config,
-            merged_env or None, Path(wf.workdir),
+            payload.stream_id,
+            payload.command,
+            payload.isolation_type,
+            payload.isolation_config,
+            merged_env or None,
+            Path(wf.workdir),
         )
 
         resolve_wf(state, event.workflow_id, payload.stream_id)
-        return [make_inbox_event(event, ev.ShellStreamStartResult(stream_id=payload.stream_id))]
+        return [
+            make_inbox_event(
+                event, ev.ShellStreamStartResult(stream_id=payload.stream_id)
+            )
+        ]
 
 
 @register_event_handler(ev.ShellStreamNextRequest)
@@ -103,19 +122,24 @@ class ShellStreamNextRequestHandler:
             stream_def = state.streams.get(stream_id)
             if stream_def and wf and wf.workdir:
                 from workflows.operations.shell_stream_op import _stream_private_envs
+
                 private_env = _stream_private_envs.get(stream_id, {})
                 merged_env = {**(stream_def.public_env or {}), **private_env}
                 _ensure_stream(
-                    stream_id, stream_def.command,
-                    stream_def.isolation_type, stream_def.isolation_config,
-                    merged_env or None, Path(wf.workdir),
+                    stream_id,
+                    stream_def.command,
+                    stream_def.isolation_type,
+                    stream_def.isolation_config,
+                    merged_env or None,
+                    Path(wf.workdir),
                 )
 
         # Register a poll handler that will deliver the next line via resolve()
         from workflows.ops import HandlerState
+
         state.handlers[event.workflow_id] = HandlerState(
-            handler_type='stream_next',
-            state={'stream_id': stream_id},
+            handler_type="stream_next",
+            state={"stream_id": stream_id},
         )
 
         return []

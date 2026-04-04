@@ -12,4 +12,4 @@ def new_id() -> str:
     _seq_counter += 1
     ts = int(time.time() * 1000)
     rand = os.urandom(2).hex()
-    return f'{ts:012x}{_seq_counter:04x}{rand}'
+    return f"{ts:012x}{_seq_counter:04x}{rand}"

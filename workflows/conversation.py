@@ -12,34 +12,47 @@ Two read operations:
 from workflows.ids import new_id  # noqa: F401
 from workflows.models.conversation import ConversationRef, MessageRef, Message  # noqa: F401
 from workflows.models.operations import (  # noqa: F401
-    ConvAppendOp, ConvListOp, ConvReadOp, ConvReplaceWithOp,
+    ConvAppendOp,
+    ConvListOp,
+    ConvReadOp,
+    ConvReplaceWithOp,
 )
 
 
 # Sentinel: resolves to the workflow's current conversation
 class _LatestType:
     _instance = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
+
     def __repr__(self):
-        return 'Latest'
+        return "Latest"
+
     def __reduce__(self):
         return (_LatestType, ())
+
 
 Latest = _LatestType()
 
 
 # ---- Yield functions ----
 
+
 def conv_append(role, content, meta=None):
     """Append a message. Returns MessageRef. Content can be str or dict/list (auto-serialized to JSON)."""
     return ConvAppendOp(role=role, content=content, meta=meta or {})
 
 
-def conv_list(conversation=None, start_message_id=None, end_message_id=None,
-              role_filter=None, pattern=None):
+def conv_list(
+    conversation=None,
+    start_message_id=None,
+    end_message_id=None,
+    role_filter=None,
+    pattern=None,
+):
     """List message refs. Returns [MessageRef]."""
     return ConvListOp(
         conversation=conversation,

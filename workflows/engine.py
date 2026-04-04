@@ -4,9 +4,17 @@ from pathlib import Path
 from workflows.decorator import _TickContext, _current_ctx
 from workflows.handlers import HANDLER_REGISTRY
 from workflows.ids import new_id
-from workflows.isolation.base import StorageConfig, setup_child_workspace, scan_git_branches
+from workflows.isolation.base import (
+    StorageConfig,
+    setup_child_workspace,
+    scan_git_branches,
+)
 from workflows.ops import (
-    Event, WorkflowHandle, WorkflowState, HandlerState, ExecutionState,
+    Event,
+    WorkflowHandle,
+    WorkflowState,
+    HandlerState,
+    ExecutionState,
 )
 from workflows.operations import DEFAULT_OP_HANDLERS
 from workflows.operations.base import OpContext
@@ -17,14 +25,20 @@ from dataclasses import dataclass as _dataclass, field as _field
 from workflows.event_handlers import DEFAULT_EVENT_HANDLERS
 from workflows.event_handlers.base import get_event_type_name
 
+
 @_dataclass
 class EngineConfig:
     """Configuration for the workflow engine."""
+
     workflows_registry: dict = _field(default_factory=dict)
-    workflow_event_handlers: dict = _field(default_factory=lambda: dict(HANDLER_REGISTRY))
+    workflow_event_handlers: dict = _field(
+        default_factory=lambda: dict(HANDLER_REGISTRY)
+    )
     event_handlers: list = _field(default_factory=lambda: list(DEFAULT_EVENT_HANDLERS))
     op_handlers: list = _field(default_factory=lambda: list(DEFAULT_OP_HANDLERS))
-    on_events: object = None  # callback(events: list[Event]) called when events are appended
+    on_events: object = (
+        None  # callback(events: list[Event]) called when events are appended
+    )
 
 
 class Engine:
@@ -40,8 +54,16 @@ class Engine:
         self.config = config
         self._op_handlers = {cls._op_type: cls for cls in config.op_handlers}
 
-    def start(self, store, workflow_name, args, now=None, source_file=None,
-              workdir=None, parent_conversation_id=None) -> str:
+    def start(
+        self,
+        store,
+        workflow_name,
+        args,
+        now=None,
+        source_file=None,
+        workdir=None,
+        parent_conversation_id=None,
+    ) -> str:
         now = now if now is not None else time.time()
         execution_id = new_id()
         root_workflow_id = new_id()
@@ -85,14 +107,17 @@ class Engine:
             state, last_processed = store.load_state(execution_id)
             new_events = self._resolve_workflow_handlers(state, execution_id, now)
             if new_events or any(
-                wf.status == 'running' for wf in state.workflows.values()
+                wf.status == "running" for wf in state.workflows.values()
             ):
-                store.save_state(execution_id, state, last_processed_event_id=last_processed)
+                store.save_state(
+                    execution_id, state, last_processed_event_id=last_processed
+                )
                 self._emit_events(store, new_events)
                 self._tick_and_process(store, execution_id, now)
             else:
                 # Queue empty, wait briefly for data
                 import time as _time
+
                 _time.sleep(0.01)
             state, _ = store.load_state(execution_id)
             if state.finished:
@@ -101,23 +126,34 @@ class Engine:
     @staticmethod
     def _has_active_streams(store, execution_id):
         from workflows.event_handlers.shell_stream import _active_streams, _streams_lock
+
         state, _ = store.load_state(execution_id)
         with _streams_lock:
             return any(sid in _active_streams for sid in state.streams)
 
     def _emit_events(self, store, new_events):
         if new_events:
-            store.append_events([
-                (e.execution_id, e.workflow_id, e.category, e.payload)
-                for e in new_events
-            ])
+            store.append_events(
+                [
+                    (e.execution_id, e.workflow_id, e.category, e.payload)
+                    for e in new_events
+                ]
+            )
             if self.config.on_events:
                 self.config.on_events(new_events)
 
     def _tick_and_process(self, store, execution_id, now):
         state, last_processed = store.load_state(execution_id)
+        handlers_before = set(state.handlers)
 
         new_events = self._handle_tick(state, execution_id, now, store)
+
+        # Catch up newly registered handlers with past events
+        new_handler_ids = set(state.handlers) - handlers_before
+        if new_handler_ids:
+            self._catchup_handlers(
+                store, state, execution_id, new_handler_ids, new_events
+            )
 
         new_events.extend(self._resolve_workflow_handlers(state, execution_id, now))
         self._check_finished(state)
@@ -148,6 +184,42 @@ class Engine:
 
         return True
 
+    def _catchup_handlers(self, store, state, execution_id, handler_ids, new_events):
+        """Replay past inbox events to newly registered handlers."""
+        # Past persisted events
+        if store:
+            for past_event in store.read_inbox(execution_id):
+                for handler_wf_id in handler_ids:
+                    hs = state.handlers.get(handler_wf_id)
+                    if not hs:
+                        continue
+                    handler_cls = self.config.workflow_event_handlers.get(
+                        hs.handler_type
+                    )
+                    if handler_cls:
+                        hs.state = handler_cls.on_event(
+                            past_event.type,
+                            past_event.workflow_id,
+                            past_event.payload,
+                            hs.state,
+                        )
+        # Current tick batch (not yet persisted)
+        for event in new_events:
+            if event.category != "inbox":
+                continue
+            for handler_wf_id in handler_ids:
+                hs = state.handlers.get(handler_wf_id)
+                if not hs:
+                    continue
+                handler_cls = self.config.workflow_event_handlers.get(hs.handler_type)
+                if handler_cls:
+                    hs.state = handler_cls.on_event(
+                        event.type,
+                        event.workflow_id,
+                        event.payload,
+                        hs.state,
+                    )
+
     def _dispatch_events(self, events, state, store):
         """Dispatch events to global and workflow handlers. Returns new events."""
         new_events = []
@@ -160,12 +232,17 @@ class Engine:
                         new_events.extend(emitted)
 
             # Workflow event handlers only see inbox events
-            if event.category == 'inbox':
+            if event.category == "inbox":
                 for handler_wf_id, hs in list(state.handlers.items()):
-                    handler_cls = self.config.workflow_event_handlers.get(hs.handler_type)
+                    handler_cls = self.config.workflow_event_handlers.get(
+                        hs.handler_type
+                    )
                     if handler_cls:
                         hs.state = handler_cls.on_event(
-                            event.type, event.workflow_id, event.payload, hs.state,
+                            event.type,
+                            event.workflow_id,
+                            event.payload,
+                            hs.state,
                         )
         return new_events
 
@@ -183,23 +260,28 @@ class Engine:
             if handler_cls.resolve(hs.state, wf, now):
                 del state.handlers[handler_wf_id]
             # Collect any events the handler wants to emit
-            for evt_payload in hs.state.pop('_emit_events', []):
-                new_events.append(Event(
-                    event_id=0, execution_id=execution_id,
-                    workflow_id=handler_wf_id, category='inbox',
-                    payload=evt_payload,
-                ))
+            for evt_payload in hs.state.pop("_emit_events", []):
+                new_events.append(
+                    Event(
+                        event_id=0,
+                        execution_id=execution_id,
+                        workflow_id=handler_wf_id,
+                        category="inbox",
+                        payload=evt_payload,
+                    )
+                )
         return new_events
 
     def _check_finished(self, state):
         root = state.workflows.get(state.root_workflow_id)
-        if root and root.status == 'finished':
+        if root and root.status == "finished":
             state.finished = True
 
     def _prune_finished(self, state):
         to_remove = [
-            wf_id for wf_id, wf in state.workflows.items()
-            if wf.status == 'finished' and wf_id != state.root_workflow_id
+            wf_id
+            for wf_id, wf in state.workflows.items()
+            if wf.status == "finished" and wf_id != state.root_workflow_id
         ]
         for wf_id in to_remove:
             del state.workflows[wf_id]
@@ -208,7 +290,7 @@ class Engine:
         new_events = []
 
         for workflow_id, wf in list(state.workflows.items()):
-            if wf.status != 'running':
+            if wf.status != "running":
                 continue
 
             send_val = wf.send_val
@@ -227,20 +309,28 @@ class Engine:
                     g = wf_func.resume(wf.checkpoint)
                     val = g.send(send_val)
             except StopIteration as e:
-                wf.status = 'finished'
+                wf.status = "finished"
                 wf.result = e.value
                 wf.checkpoint = None
-                self._register_children(state, ctx, new_events, execution_id, workflow_id, store)
-                new_events.append(Event(
-                    event_id=0, execution_id=execution_id,
-                    workflow_id=workflow_id, category='inbox',
-                    payload=ev.WorkflowFinished(result=e.value),
-                ))
+                self._register_children(
+                    state, ctx, new_events, execution_id, workflow_id, store
+                )
+                new_events.append(
+                    Event(
+                        event_id=0,
+                        execution_id=execution_id,
+                        workflow_id=workflow_id,
+                        category="inbox",
+                        payload=ev.WorkflowFinished(result=e.value),
+                    )
+                )
                 continue
             finally:
                 _current_ctx.reset(token)
 
-            self._register_children(state, ctx, new_events, execution_id, workflow_id, store)
+            self._register_children(
+                state, ctx, new_events, execution_id, workflow_id, store
+            )
             wf.checkpoint = pickle.loads(g.save())
 
             op_ctx = OpContext(
@@ -256,36 +346,49 @@ class Engine:
             handler = self._op_handlers.get(type(val))
             if handler:
                 handler.handle(val, op_ctx)
-            new_events.append(Event(
-                event_id=0, 
-                execution_id=execution_id,
-                workflow_id=workflow_id, 
-                category='outbox',
-                payload=ev.WorkflowYielded(value=val),
-            ))
+            new_events.append(
+                Event(
+                    event_id=0,
+                    execution_id=execution_id,
+                    workflow_id=workflow_id,
+                    category="outbox",
+                    payload=ev.WorkflowYielded(value=val),
+                )
+            )
 
         return new_events
 
-    def _register_children(self, state, ctx, new_events, execution_id, parent_workflow_id, store=None):
+    def _register_children(
+        self, state, ctx, new_events, execution_id, parent_workflow_id, store=None
+    ):
         for handle in ctx.new_children:
-            self._register_child(state, handle, new_events, execution_id, parent_workflow_id, store)
+            self._register_child(
+                state, handle, new_events, execution_id, parent_workflow_id, store
+            )
 
-    def _register_child(self, state, handle, new_events, execution_id, parent_workflow_id, store=None):
-        parent_wf = state.workflows.get(parent_workflow_id) if parent_workflow_id else None
+    def _register_child(
+        self, state, handle, new_events, execution_id, parent_workflow_id, store=None
+    ):
+        parent_wf = (
+            state.workflows.get(parent_workflow_id) if parent_workflow_id else None
+        )
 
-        config = handle.storage or StorageConfig(mode='same')
+        config = handle.storage or StorageConfig(mode="same")
         child_wf = WorkflowState(
             name=handle.workflow_name,
             args=list(handle.args),
             parent_workflow_id=parent_workflow_id,
-            description=getattr(handle, 'description', ''),
+            description=getattr(handle, "description", ""),
         )
 
         if parent_wf and parent_wf.workdir:
             parent_dir = Path(parent_wf.workdir)
             child_dir = parent_dir.parent / handle.id
             child_workdir, child_branches = setup_child_workspace(
-                parent_dir, child_dir, parent_wf.branches, config,
+                parent_dir,
+                child_dir,
+                parent_wf.branches,
+                config,
             )
             child_wf.workdir = str(child_workdir)
             child_wf.branches = child_branches
@@ -303,14 +406,18 @@ class Engine:
 
         state.workflows[handle.id] = child_wf
 
-        new_events.append(Event(
-            event_id=0, execution_id=execution_id,
-            workflow_id=handle.id, category='outbox',
-            payload=ev.WorkflowSpawned(
-                child_workflow_id=handle.id,
-                name=handle.workflow_name,
-                args=list(handle.args),
-                parent_workflow_id=parent_workflow_id,
-                storage_mode=config.mode,
-            ),
-        ))
+        new_events.append(
+            Event(
+                event_id=0,
+                execution_id=execution_id,
+                workflow_id=handle.id,
+                category="outbox",
+                payload=ev.WorkflowSpawned(
+                    child_workflow_id=handle.id,
+                    name=handle.workflow_name,
+                    args=list(handle.args),
+                    parent_workflow_id=parent_workflow_id,
+                    storage_mode=config.mode,
+                ),
+            )
+        )

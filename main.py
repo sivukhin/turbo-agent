@@ -13,18 +13,18 @@ from workflows.tasks import TaskStore
 import workflows.events as ev
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'executions.db')
-TASKS_DB_PATH = os.path.join(os.path.dirname(__file__), 'tasks.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), "executions.db")
+TASKS_DB_PATH = os.path.join(os.path.dirname(__file__), "tasks.db")
 console = Console()
 
 
 def _parse_target(target: str) -> tuple[str, str]:
     """Parse 'file.py:function' into (file_path, function_name)."""
-    if ':' not in target:
-        console.print(f'[red]Invalid target:[/] {target}')
-        console.print('Expected format: [bold]path/to/file.py:workflow_name[/]')
+    if ":" not in target:
+        console.print(f"[red]Invalid target:[/] {target}")
+        console.print("Expected format: [bold]path/to/file.py:workflow_name[/]")
         sys.exit(1)
-    file_path, func_name = target.rsplit(':', 1)
+    file_path, func_name = target.rsplit(":", 1)
     return file_path, func_name
 
 
@@ -37,25 +37,25 @@ def _load_registry_for_execution(store, execution_id):
     state, _ = store.load_state(execution_id)
     file_path = state.source_file
     if not file_path:
-        console.print(f'[red]Execution {execution_id} has no source file[/]')
+        console.print(f"[red]Execution {execution_id} has no source file[/]")
         sys.exit(1)
     return load_workflows_from_file(file_path), state
 
 
 def _status_style(status):
-    return {'running': 'green', 'waiting': 'yellow', 'finished': 'dim'}[status]
+    return {"running": "green", "waiting": "yellow", "finished": "dim"}[status]
 
 
 def _category_style(category):
-    return {'inbox': 'cyan', 'outbox': 'magenta'}[category]
+    return {"inbox": "cyan", "outbox": "magenta"}[category]
 
 
 def cmd_start(args):
     file_path, wf_name = _parse_target(args.target)
     registry = _load_registry(file_path)
     if wf_name not in registry:
-        console.print(f'[red]Unknown workflow:[/] {wf_name}')
-        console.print(f'Available in {file_path}: {", ".join(registry)}')
+        console.print(f"[red]Unknown workflow:[/] {wf_name}")
+        console.print(f"Available in {file_path}: {', '.join(registry)}")
         sys.exit(1)
 
     parsed_args = [json.loads(a) for a in args.args]
@@ -63,15 +63,16 @@ def cmd_start(args):
     engine = Engine(EngineConfig(workflows_registry=registry))
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
-    execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path,
-                                workdir=workdir)
+    execution_id = engine.start(
+        store, wf_name, parsed_args, source_file=file_path, workdir=workdir
+    )
 
     inbox = store.read_inbox(execution_id)
     outbox = store.read_outbox(execution_id)
     store.close()
 
-    console.print(f'[bold]Started execution[/] [cyan]{execution_id}[/]')
-    console.print(f'  workflow: [bold]{wf_name}[/]({", ".join(args.args)})')
+    console.print(f"[bold]Started execution[/] [cyan]{execution_id}[/]")
+    console.print(f"  workflow: [bold]{wf_name}[/]({', '.join(args.args)})")
     _print_step_events(inbox, outbox, trace=True)
 
 
@@ -80,7 +81,7 @@ def cmd_step(args):
     registry, state = _load_registry_for_execution(store, args.id)
     if state.finished:
         store.close()
-        console.print(f'[yellow]Execution {args.id} already finished[/]')
+        console.print(f"[yellow]Execution {args.id} already finished[/]")
         sys.exit(1)
 
     inbox_before = store.read_inbox(args.id)
@@ -88,12 +89,12 @@ def cmd_step(args):
     last_inbox = inbox_before[-1].event_id if inbox_before else 0
     last_outbox = outbox_before[-1].event_id if outbox_before else 0
 
-    trace = getattr(args, 'trace', False)
+    trace = getattr(args, "trace", False)
 
     def _on_events(events):
         _print_step_events(
-            [e for e in events if e.category == 'inbox'],
-            [e for e in events if e.category == 'outbox'],
+            [e for e in events if e.category == "inbox"],
+            [e for e in events if e.category == "outbox"],
             trace=trace,
         )
 
@@ -103,7 +104,7 @@ def cmd_step(args):
         engine.step(store, args.id)
     except Exception as e:
         store.close()
-        console.print(f'[red]error:[/] {e}', highlight=False)
+        console.print(f"[red]error:[/] {e}", highlight=False)
         sys.exit(1)
 
     state, _ = store.load_state(args.id)
@@ -113,7 +114,7 @@ def cmd_step(args):
     _print_step_events(new_inbox, new_outbox, trace=True)
     if state.finished:
         root = state.workflows[state.root_workflow_id]
-        console.print(f'  [bold green]returned:[/] {root.result!r}')
+        console.print(f"  [bold green]returned:[/] {root.result!r}")
         store.close()
         return
 
@@ -130,21 +131,27 @@ def _handle_user_prompts(store, execution_id, engine, trace=False):
     inbox = store.read_inbox(execution_id)
 
     # Find prompt requests
-    requests = {e.payload.request_id: e
-                for e in outbox if isinstance(e.payload, UserPromptRequest)}
+    requests = {
+        e.payload.request_id: e
+        for e in outbox
+        if isinstance(e.payload, UserPromptRequest)
+    }
     # Find already-answered
-    answered = {e.payload.request_id
-                for e in inbox if isinstance(e.payload, UserPromptResult)}
+    answered = {
+        e.payload.request_id for e in inbox if isinstance(e.payload, UserPromptResult)
+    }
 
     for request_id, event in requests.items():
         if request_id in answered:
             continue
         # Unanswered prompt — ask the user
-        response = console.input('[bold green]You>[/] ')
+        response = console.input("[bold green]You>[/] ")
 
         # Write the result to inbox
         store.append_event(
-            execution_id, event.workflow_id, 'inbox',
+            execution_id,
+            event.workflow_id,
+            "inbox",
             UserPromptResult(request_id=request_id, response=response),
         )
 
@@ -162,7 +169,7 @@ def _handle_user_prompts(store, execution_id, engine, trace=False):
         )
         if state.finished:
             root = state.workflows[state.root_workflow_id]
-            console.print(f'  [bold green]returned:[/] {root.result!r}')
+            console.print(f"  [bold green]returned:[/] {root.result!r}")
 
 
 def _print_claude_stream_line(line):
@@ -172,62 +179,72 @@ def _print_claude_stream_line(line):
     try:
         event = json.loads(line)
     except json.JSONDecodeError:
-        console.print(f'[dim]{line[:200]}[/]')
+        console.print(f"[dim]{line[:200]}[/]")
         return
 
-    etype = event.get('type')
-    subtype = event.get('subtype', '')
+    etype = event.get("type")
+    subtype = event.get("subtype", "")
 
-    if etype == 'system':
-        if subtype == 'init':
-            console.print(f'[dim]claude: session started (model={event.get("model", "?")})[/]')
-        elif subtype == 'task_started':
-            console.print(f'[dim]claude: agent> {event.get("description", "")}[/]')
-        elif subtype == 'task_progress':
-            desc = event.get('description', '')
-            usage = event.get('usage', {})
-            console.print(f'[dim]claude: {desc} (tokens={usage.get("total_tokens", 0)})[/]')
+    if etype == "system":
+        if subtype == "init":
+            console.print(
+                f"[dim]claude: session started (model={event.get('model', '?')})[/]"
+            )
+        elif subtype == "task_started":
+            console.print(f"[dim]claude: agent> {event.get('description', '')}[/]")
+        elif subtype == "task_progress":
+            desc = event.get("description", "")
+            usage = event.get("usage", {})
+            console.print(
+                f"[dim]claude: {desc} (tokens={usage.get('total_tokens', 0)})[/]"
+            )
 
-    elif etype == 'assistant':
-        msg = event.get('message', {})
-        for block in msg.get('content', []):
-            btype = block.get('type')
-            if btype == 'text':
-                text = block.get('text', '')
+    elif etype == "assistant":
+        msg = event.get("message", {})
+        for block in msg.get("content", []):
+            btype = block.get("type")
+            if btype == "text":
+                text = block.get("text", "")
                 if text.strip():
-                    console.print(f'[blue]claude>[/] {text[:300]}{"..." if len(text) > 300 else ""}')
-            elif btype == 'tool_use':
-                name = block.get('name', '?')
-                inp = block.get('input', {})
+                    console.print(
+                        f"[blue]claude>[/] {text[:300]}{'...' if len(text) > 300 else ''}"
+                    )
+            elif btype == "tool_use":
+                name = block.get("name", "?")
+                inp = block.get("input", {})
                 inp_str = str(inp)
                 if len(inp_str) > 150:
-                    inp_str = inp_str[:147] + '...'
-                console.print(f'[magenta]claude tool>[/] {name}({inp_str})')
-            elif btype == 'thinking':
-                thinking = block.get('thinking', '')
+                    inp_str = inp_str[:147] + "..."
+                console.print(f"[magenta]claude tool>[/] {name}({inp_str})")
+            elif btype == "thinking":
+                thinking = block.get("thinking", "")
                 if thinking.strip():
-                    console.print(f'[dim italic]claude thinking> {thinking[:200]}{"..." if len(thinking) > 200 else ""}[/]')
+                    console.print(
+                        f"[dim italic]claude thinking> {thinking[:200]}{'...' if len(thinking) > 200 else ''}[/]"
+                    )
 
-    elif etype == 'user':
-        msg = event.get('message', {})
-        for block in msg.get('content', []):
-            if isinstance(block, dict) and block.get('type') == 'tool_result':
-                content = block.get('content', '')
-                is_error = block.get('is_error', False)
+    elif etype == "user":
+        msg = event.get("message", {})
+        for block in msg.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                content = block.get("content", "")
+                is_error = block.get("is_error", False)
                 if isinstance(content, list):
-                    content = '\n'.join(b.get('text', '') for b in content if isinstance(b, dict))
+                    content = "\n".join(
+                        b.get("text", "") for b in content if isinstance(b, dict)
+                    )
                 content = str(content)
                 if len(content) > 300:
-                    content = content[:297] + '...'
+                    content = content[:297] + "..."
                 if is_error:
-                    console.print(f'[red]claude result>[/] {content}')
+                    console.print(f"[red]claude result>[/] {content}")
                 else:
-                    console.print(f'[cyan]claude result>[/] {content}')
+                    console.print(f"[cyan]claude result>[/] {content}")
 
-    elif etype == 'result':
-        result = event.get('result', '')
+    elif etype == "result":
+        result = event.get("result", "")
         if result:
-            console.print(f'[bold green]claude done>[/] {str(result)[:500]}')
+            console.print(f"[bold green]claude done>[/] {str(result)[:500]}")
 
 
 def _print_step_events(inbox, outbox, trace=False):
@@ -236,27 +253,36 @@ def _print_step_events(inbox, outbox, trace=False):
         payload = event.payload
         if not trace:
             if isinstance(payload, ev.AiResponseEvent):
-                console.print(f'[bold blue]Assistant>[/] {payload.text}')
+                console.print(f"[bold blue]Assistant>[/] {payload.text}")
                 continue
             if isinstance(payload, ev.ConvAppendRequest):
-                labels = (payload.meta or {}).get('labels', '') if hasattr(payload, 'meta') else ''
-                hidden = 'hidden' in labels.split(',')
-                role_style = {'user': 'green', 'assistant': 'blue', 'tool_use': 'magenta', 'tool_result': 'cyan'}.get(payload.role, 'white')
+                labels = (
+                    (payload.meta or {}).get("labels", "")
+                    if hasattr(payload, "meta")
+                    else ""
+                )
+                hidden = "hidden" in labels.split(",")
+                role_style = {
+                    "user": "green",
+                    "assistant": "blue",
+                    "tool_use": "magenta",
+                    "tool_result": "cyan",
+                }.get(payload.role, "white")
                 content = str(payload.content)
                 if len(content) > 200:
-                    content = content[:197] + '...'
+                    content = content[:197] + "..."
                 if hidden:
-                    console.print(f'[dim]{payload.role}> {content}[/]')
+                    console.print(f"[dim]{payload.role}> {content}[/]")
                 else:
-                    console.print(f'[bold {role_style}]{payload.role}>[/] {content}')
+                    console.print(f"[bold {role_style}]{payload.role}>[/] {content}")
                 continue
             continue
-        wf_id = (event.workflow_id or '-')[:8]
+        wf_id = (event.workflow_id or "-")[:8]
         cat_style = _category_style(event.category)
         payload_str = _format_payload(payload)
         console.print(
-            f'  [{cat_style}]{event.category:<6}[/] [dim]{wf_id}[/] '
-            f'[bold]{event.type}[/] {payload_str}'
+            f"  [{cat_style}]{event.category:<6}[/] [dim]{wf_id}[/] "
+            f"[bold]{event.type}[/] {payload_str}"
         )
 
 
@@ -265,10 +291,10 @@ def cmd_status(args):
     state, last_event = store.load_state(args.id)
     store.close()
 
-    finished_text = '[green]yes[/]' if state.finished else '[yellow]no[/]'
+    finished_text = "[green]yes[/]" if state.finished else "[yellow]no[/]"
     root_tree = Tree(
-        f'[bold]Execution[/] [cyan]{args.id}[/]  '
-        f'finished={finished_text}  [dim]{state.source_file}[/]'
+        f"[bold]Execution[/] [cyan]{args.id}[/]  "
+        f"finished={finished_text}  [dim]{state.source_file}[/]"
     )
 
     children_of = {}
@@ -278,14 +304,14 @@ def cmd_status(args):
     def _render(tree_node, wf_id):
         wf = state.workflows[wf_id]
         style = _status_style(wf.status)
-        root_tag = ' [bold cyan][root][/]' if wf_id == state.root_workflow_id else ''
-        extra = ''
-        if wf.status == 'finished':
-            extra = f'  result={wf.result!r}'
+        root_tag = " [bold cyan][root][/]" if wf_id == state.root_workflow_id else ""
+        extra = ""
+        if wf.status == "finished":
+            extra = f"  result={wf.result!r}"
         if wf_id in state.handlers:
-            extra += f'  [yellow]({state.handlers[wf_id].handler_type})[/]'
+            extra += f"  [yellow]({state.handlers[wf_id].handler_type})[/]"
         node = tree_node.add(
-            f'[bold]{wf.name}[/]{root_tag}  [dim]{wf_id[:8]}[/]  [{style}]{wf.status}[/]{extra}'
+            f"[bold]{wf.name}[/]{root_tag}  [dim]{wf_id[:8]}[/]  [{style}]{wf.status}[/]{extra}"
         )
         for child_id in children_of.get(wf_id, []):
             _render(node, child_id)
@@ -303,20 +329,21 @@ def cmd_events(args):
     all_events = sorted(inbox + outbox, key=lambda e: e.event_id)
 
     if not all_events:
-        console.print('[dim]No events.[/]')
+        console.print("[dim]No events.[/]")
         return
 
-    table = Table(title=f'Events for {args.id}', show_lines=False)
-    table.add_column('#', style='dim', width=5)
-    table.add_column('category', width=7)
-    table.add_column('type', width=20)
-    table.add_column('workflow', style='dim', width=14)
-    table.add_column('payload')
+    table = Table(title=f"Events for {args.id}", show_lines=False)
+    table.add_column("#", style="dim", width=5)
+    table.add_column("category", width=7)
+    table.add_column("type", width=20)
+    table.add_column("workflow", style="dim", width=14)
+    table.add_column("payload")
 
     for event in all_events:
         cat_style = _category_style(event.category)
-        wf_id = (event.workflow_id or '-')[:12]
+        wf_id = (event.workflow_id or "-")[:12]
         from workflows.events import serialize_payload
+
         payload_json = serialize_payload(event.payload)
         table.add_row(
             str(event.event_id),
@@ -331,89 +358,92 @@ def cmd_events(args):
 
 def _format_payload(payload):
     from workflows import events as ev
+
     if isinstance(payload, ev.WorkflowYielded):
         return repr(payload.value)
     if isinstance(payload, ev.WorkflowFinished):
-        return f'result={payload.result!r}'
+        return f"result={payload.result!r}"
     if isinstance(payload, ev.ShellRequest):
-        return f'$ {payload.command}'
+        return f"$ {payload.command}"
     if isinstance(payload, ev.ShellResult):
-        parts = [f'exit={payload.exit_code}']
+        parts = [f"exit={payload.exit_code}"]
         out = payload.stdout.strip()
         err = payload.stderr.strip()
         if out:
-            parts.append(f'stdout={out!r}')
+            parts.append(f"stdout={out!r}")
         if err:
-            parts.append(f'stderr={err!r}')
-        return ', '.join(parts)
+            parts.append(f"stderr={err!r}")
+        return ", ".join(parts)
     if isinstance(payload, ev.FileReadRequest):
-        return f'read {payload.path}'
+        return f"read {payload.path}"
     if isinstance(payload, ev.FileReadResult):
         content = payload.content
         if len(content) > 80:
-            content = content[:77] + '...'
-        return f'{payload.path}: {content!r}'
+            content = content[:77] + "..."
+        return f"{payload.path}: {content!r}"
     if isinstance(payload, ev.FileWriteRequest):
         content = payload.content
         if len(content) > 80:
-            content = content[:77] + '...'
-        return f'write {payload.path}: {content!r}'
+            content = content[:77] + "..."
+        return f"write {payload.path}: {content!r}"
     if isinstance(payload, ev.FileWriteResult):
-        return f'{payload.path} ({payload.size} bytes)'
+        return f"{payload.path} ({payload.size} bytes)"
     if isinstance(payload, ev.WaitStarted):
-        deps = ', '.join(d[:8] for d in payload.deps)
-        return f'{payload.mode}({deps})'
+        deps = ", ".join(d[:8] for d in payload.deps)
+        return f"{payload.mode}({deps})"
     if isinstance(payload, ev.SleepStarted):
-        return f'{payload.seconds}s (wake_at={payload.wake_at})'
+        return f"{payload.seconds}s (wake_at={payload.wake_at})"
     if isinstance(payload, ev.UserPromptRequest):
-        return f'[{payload.request_id[:8]}] waiting for input'
+        return f"[{payload.request_id[:8]}] waiting for input"
     if isinstance(payload, ev.UserPromptResult):
-        return f'[{payload.request_id[:8]}] {payload.response!r}'
+        return f"[{payload.request_id[:8]}] {payload.response!r}"
     if isinstance(payload, ev.AiResponseEvent):
-        text = payload.text[:80] + ('...' if len(payload.text) > 80 else '')
+        text = payload.text[:80] + ("..." if len(payload.text) > 80 else "")
         return text
     if isinstance(payload, ev.WorkflowSpawned):
-        parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else '-'
-        return f'{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}'
+        parent = payload.parent_workflow_id[:8] if payload.parent_workflow_id else "-"
+        return f"{payload.name}({payload.args}) parent={parent} storage={payload.storage_mode}"
     if isinstance(payload, ev.ConvAppendRequest):
         content = str(payload.content)
         if len(content) > 60:
-            content = content[:57] + '...'
-        return f'{payload.role}: {content!r}'
+            content = content[:57] + "..."
+        return f"{payload.role}: {content!r}"
     if isinstance(payload, ev.ConvAppendResult):
-        return f'msg={payload.message_id[:12]} layer={payload.layer}'
+        return f"msg={payload.message_id[:12]} layer={payload.layer}"
     if isinstance(payload, ev.ConvReadRequest):
-        return f'conv={payload.conversation_id[:8]}'
+        return f"conv={payload.conversation_id[:8]}"
     if isinstance(payload, ev.ConvReadResult):
-        return f'{payload.count} messages'
+        return f"{payload.count} messages"
     if isinstance(payload, ev.ConvListRequest):
-        return f'conv={payload.conversation_id[:8]}'
+        return f"conv={payload.conversation_id[:8]}"
     if isinstance(payload, ev.ConvListResult):
-        return f'{payload.count} messages'
+        return f"{payload.count} messages"
     if isinstance(payload, ev.ConvReplaceWithRequest):
-        return f'{len(payload.new_messages)} new msgs'
+        return f"{len(payload.new_messages)} new msgs"
     if isinstance(payload, ev.ConvReplaceWithResult):
-        return f'layer={payload.new_layer} {len(payload.new_message_refs)} msgs'
+        return f"layer={payload.new_layer} {len(payload.new_message_refs)} msgs"
     if isinstance(payload, ev.LlmRequest):
         if payload.conversation_ref:
-            src = f'conv={payload.conversation_ref.conversation_id[:8]}'
+            src = f"conv={payload.conversation_ref.conversation_id[:8]}"
         else:
-            src = f'{len(payload.messages)} msgs' if payload.messages else '0 msgs'
-        tools = f', {len(payload.tools)} tools' if payload.tools else ''
-        return f'{payload.model} ({src}{tools}, T={payload.temperature})'
+            src = f"{len(payload.messages)} msgs" if payload.messages else "0 msgs"
+        tools = f", {len(payload.tools)} tools" if payload.tools else ""
+        return f"{payload.model} ({src}{tools}, T={payload.temperature})"
     if isinstance(payload, ev.LlmResponse):
-        texts = [b['text'][:60] for b in payload.content if b.get('type') == 'text']
-        tool_calls = [b['name'] for b in payload.content if b.get('type') == 'tool_use']
+        texts = [b["text"][:60] for b in payload.content if b.get("type") == "text"]
+        tool_calls = [b["name"] for b in payload.content if b.get("type") == "tool_use"]
         parts = []
         if texts:
-            parts.append(f'text={texts[0]!r}{"..." if len(texts[0]) >= 60 else ""}')
+            parts.append(f"text={texts[0]!r}{'...' if len(texts[0]) >= 60 else ''}")
         if tool_calls:
-            parts.append(f'tools=[{", ".join(tool_calls)}]')
+            parts.append(f"tools=[{', '.join(tool_calls)}]")
         if payload.stop_reason:
-            parts.append(f'stop={payload.stop_reason}')
+            parts.append(f"stop={payload.stop_reason}")
         if payload.usage:
-            parts.append(f'tokens={payload.usage.get("input_tokens",0)}+{payload.usage.get("output_tokens",0)}')
-        return ', '.join(parts)
+            parts.append(
+                f"tokens={payload.usage.get('input_tokens', 0)}+{payload.usage.get('output_tokens', 0)}"
+            )
+        return ", ".join(parts)
     return repr(payload)
 
 
@@ -422,11 +452,11 @@ def cmd_inspect(args):
     state, last_event = store.load_state(args.id)
     store.close()
 
-    finished_text = '[green]yes[/]' if state.finished else '[yellow]no[/]'
+    finished_text = "[green]yes[/]" if state.finished else "[yellow]no[/]"
     root_tree = Tree(
-        f'[bold]Execution[/] [cyan]{args.id}[/]  '
-        f'finished={finished_text}  last_event={last_event}  '
-        f'[dim]{state.source_file}[/]'
+        f"[bold]Execution[/] [cyan]{args.id}[/]  "
+        f"finished={finished_text}  last_event={last_event}  "
+        f"[dim]{state.source_file}[/]"
     )
 
     # Build parent→children map
@@ -439,33 +469,35 @@ def cmd_inspect(args):
     def _render_wf(tree_node, wf_id):
         wf = state.workflows[wf_id]
         style = _status_style(wf.status)
-        root_tag = ' [bold cyan][root][/]' if wf_id == state.root_workflow_id else ''
-        label = f'[bold]{wf.name}[/]{root_tag}  [dim]{wf_id}[/]  [{style}]{wf.status}[/]'
+        root_tag = " [bold cyan][root][/]" if wf_id == state.root_workflow_id else ""
+        label = (
+            f"[bold]{wf.name}[/]{root_tag}  [dim]{wf_id}[/]  [{style}]{wf.status}[/]"
+        )
         wf_node = tree_node.add(label)
 
-        wf_node.add(f'[dim]args:[/] {wf.args!r}')
+        wf_node.add(f"[dim]args:[/] {wf.args!r}")
 
-        if wf.status == 'finished':
-            wf_node.add(f'[dim]result:[/] [green]{wf.result!r}[/]')
+        if wf.status == "finished":
+            wf_node.add(f"[dim]result:[/] [green]{wf.result!r}[/]")
 
         if wf.checkpoint:
             cp = wf.checkpoint
-            if cp.get('locals'):
-                locals_node = wf_node.add('[dim]locals:[/]')
-                for k, v in sorted(cp['locals'].items()):
-                    locals_node.add(f'[bold]{k}[/] = {v!r}')
-            if cp.get('drain'):
-                wf_node.add(f'[dim]stack:[/] {cp["drain"]!r}')
-            if cp.get('yield_idx') is not None:
-                wf_node.add(f'[dim]yield_idx:[/] {cp["yield_idx"]}')
-            if cp.get('yv') is not None:
-                wf_node.add(f'[dim]yielded:[/] {cp["yv"]!r}')
+            if cp.get("locals"):
+                locals_node = wf_node.add("[dim]locals:[/]")
+                for k, v in sorted(cp["locals"].items()):
+                    locals_node.add(f"[bold]{k}[/] = {v!r}")
+            if cp.get("drain"):
+                wf_node.add(f"[dim]stack:[/] {cp['drain']!r}")
+            if cp.get("yield_idx") is not None:
+                wf_node.add(f"[dim]yield_idx:[/] {cp['yield_idx']}")
+            if cp.get("yv") is not None:
+                wf_node.add(f"[dim]yielded:[/] {cp['yv']!r}")
 
         handler = state.handlers.get(wf_id)
         if handler:
-            h_node = wf_node.add(f'[dim]handler:[/] [yellow]{handler.handler_type}[/]')
+            h_node = wf_node.add(f"[dim]handler:[/] [yellow]{handler.handler_type}[/]")
             for k, v in sorted(handler.state.items()):
-                h_node.add(f'[bold]{k}[/] = {v!r}')
+                h_node.add(f"[bold]{k}[/] = {v!r}")
 
         for child_id in children_of.get(wf_id, []):
             _render_wf(wf_node, child_id)
@@ -475,10 +507,12 @@ def cmd_inspect(args):
 
     # Render orphans (shouldn't happen, but just in case)
     rendered = set()
+
     def _collect(wf_id):
         rendered.add(wf_id)
         for child_id in children_of.get(wf_id, []):
             _collect(child_id)
+
     _collect(state.root_workflow_id)
     for wf_id in state.workflows:
         if wf_id not in rendered:
@@ -496,11 +530,11 @@ def cmd_conv(args):
         cur = store.conn.cursor()
         cur.execute(
             "SELECT conversation_id FROM conversation_refs WHERE conversation_id LIKE ?",
-            (f'{args.conversation_id}%',),
+            (f"{args.conversation_id}%",),
         )
         rows = cur.fetchall()
         if not rows:
-            console.print(f'[red]No conversation matching {args.conversation_id}[/]')
+            console.print(f"[red]No conversation matching {args.conversation_id}[/]")
             store.close()
             sys.exit(1)
         for (conv_id,) in rows:
@@ -516,6 +550,7 @@ def cmd_conv(args):
                 conv_ids.add(wf.conversation_id)
         # Also find conversations from pruned workflows via events
         from workflows.events import ConvAppendRequest
+
         outbox = store.read_outbox(args.id)
         for event in outbox:
             if isinstance(event.payload, ConvAppendRequest):
@@ -536,11 +571,12 @@ def _find_conv_owner(state, store, execution_id, conversation_id):
     # Search events for pruned workflows
     outbox = store.read_outbox(execution_id)
     from workflows.events import WorkflowSpawned, ConvAppendRequest
+
     for event in outbox:
         if isinstance(event.payload, ConvAppendRequest):
             if event.payload.conversation_id == conversation_id:
-                return '(pruned)', event.workflow_id or '?'
-    return '(unknown)', '?'
+                return "(pruned)", event.workflow_id or "?"
+    return "(unknown)", "?"
 
 
 def _print_conversation(store, conversation_id, wf_name, wf_id):
@@ -558,53 +594,53 @@ def _print_conversation(store, conversation_id, wf_name, wf_id):
     parent = row[0] if row and row[0] else None
 
     console.print(
-        f'[bold]{wf_name}[/] [dim]{wf_id[:8]}[/]  '
-        f'conv=[cyan]{conversation_id[:8]}[/]  '
-        f'{len(messages)} messages'
-        + (f'  [dim]parent={parent[:8]}[/]' if parent else '')
+        f"[bold]{wf_name}[/] [dim]{wf_id[:8]}[/]  "
+        f"conv=[cyan]{conversation_id[:8]}[/]  "
+        f"{len(messages)} messages"
+        + (f"  [dim]parent={parent[:8]}[/]" if parent else "")
     )
 
     if not messages:
-        console.print('  [dim](empty)[/]')
+        console.print("  [dim](empty)[/]")
         return
 
     role_style = {
-        'user': 'green',
-        'assistant': 'blue',
-        'system': 'yellow',
-        'tool_use': 'purple',
-        'tool_result': 'magenta',
+        "user": "green",
+        "assistant": "blue",
+        "system": "yellow",
+        "tool_use": "purple",
+        "tool_result": "magenta",
     }
 
     table = Table(show_lines=False, show_header=True, padding=(0, 1))
-    table.add_column('#', style='dim', width=4)
-    table.add_column('role', width=12)
-    table.add_column('content')
-    table.add_column('ref', style='dim', width=12)
+    table.add_column("#", style="dim", width=4)
+    table.add_column("role", width=12)
+    table.add_column("content")
+    table.add_column("ref", style="dim", width=12)
 
     for i, msg in enumerate(messages):
-        labels = msg.ref.meta.get('labels', '')
-        if 'hidden' in labels.split(','):
+        labels = msg.ref.meta.get("labels", "")
+        if "hidden" in labels.split(","):
             continue
-        style = role_style.get(msg.role, 'white')
+        style = role_style.get(msg.role, "white")
         content = msg.content
-        if msg.role == 'tool_use':
+        if msg.role == "tool_use":
             try:
                 data = json.loads(content)
                 content = f"[bold purple]{data.get('name', '?')}[/] {json.dumps(data.get('input', {}))}"
             except Exception:
                 pass
-        elif msg.role == 'tool_result':
+        elif msg.role == "tool_result":
             try:
                 data = json.loads(content)
                 content = f"[dim]{data.get('tool_use_id', '')}[/] {data.get('output', content)}"
             except Exception:
                 pass
         if len(content) > 120:
-            content = content[:117] + '...'
+            content = content[:117] + "..."
         from_parent = msg.ref.conversation_id != conversation_id
-        parent_tag = ' [dim](parent)[/]' if from_parent else ''
-        label_tag = f' [dim][{labels}][/]' if labels else ''
+        parent_tag = " [dim](parent)[/]" if from_parent else ""
+        label_tag = f" [dim][{labels}][/]" if labels else ""
         table.add_row(
             str(i),
             Text(msg.role, style=style),
@@ -627,8 +663,8 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
             if e.event_id:
                 last_event = max(last_event, e.event_id)
         _print_step_events(
-            [e for e in events if e.category == 'inbox'],
-            [e for e in events if e.category == 'outbox'],
+            [e for e in events if e.category == "inbox"],
+            [e for e in events if e.category == "outbox"],
             trace=trace,
         )
 
@@ -645,8 +681,8 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
             if all_new:
                 last_event = all_new[-1].event_id
                 _print_step_events(
-                    [e for e in all_new if e.category == 'inbox'],
-                    [e for e in all_new if e.category == 'outbox'],
+                    [e for e in all_new if e.category == "inbox"],
+                    [e for e in all_new if e.category == "outbox"],
                     trace=trace,
                 )
 
@@ -666,19 +702,21 @@ def _run_loop(store, engine, execution_id, trace=False, max_steps=1000):
     all_new = store.read_all_events(execution_id, after_event_id=last_event)
     if all_new:
         _print_step_events(
-            [e for e in all_new if e.category == 'inbox'],
-            [e for e in all_new if e.category == 'outbox'],
+            [e for e in all_new if e.category == "inbox"],
+            [e for e in all_new if e.category == "outbox"],
             trace=trace,
         )
 
     if interrupted:
-        console.print(f'\n  [yellow]Paused[/] [cyan]{execution_id}[/] — resume with: '
-                       f'[bold]main.py continue {execution_id}[/]')
+        console.print(
+            f"\n  [yellow]Paused[/] [cyan]{execution_id}[/] — resume with: "
+            f"[bold]main.py continue {execution_id}[/]"
+        )
     elif state.finished:
         root = state.workflows[state.root_workflow_id]
-        console.print(f'\n  [bold green]returned:[/] {root.result!r}')
+        console.print(f"\n  [bold green]returned:[/] {root.result!r}")
     else:
-        console.print(f'\n  [yellow]Did not finish after {max_steps} steps[/]')
+        console.print(f"\n  [yellow]Did not finish after {max_steps} steps[/]")
 
 
 def cmd_run(args):
@@ -686,8 +724,8 @@ def cmd_run(args):
     file_path, wf_name = _parse_target(args.target)
     registry = _load_registry(file_path)
     if wf_name not in registry:
-        console.print(f'[red]Unknown workflow:[/] {wf_name}')
-        console.print(f'Available in {file_path}: {", ".join(registry)}')
+        console.print(f"[red]Unknown workflow:[/] {wf_name}")
+        console.print(f"Available in {file_path}: {', '.join(registry)}")
         sys.exit(1)
 
     parsed_args = [json.loads(a) for a in args.args]
@@ -695,11 +733,14 @@ def cmd_run(args):
     engine = Engine(EngineConfig(workflows_registry=registry))
     workdir = os.path.abspath(args.workdir)
     os.makedirs(workdir, exist_ok=True)
-    execution_id = engine.start(store, wf_name, parsed_args, source_file=file_path,
-                                workdir=workdir)
+    execution_id = engine.start(
+        store, wf_name, parsed_args, source_file=file_path, workdir=workdir
+    )
 
-    trace = getattr(args, 'trace', False)
-    console.print(f'[bold]Running[/] [cyan]{execution_id}[/] {wf_name}({", ".join(args.args)})')
+    trace = getattr(args, "trace", False)
+    console.print(
+        f"[bold]Running[/] [cyan]{execution_id}[/] {wf_name}({', '.join(args.args)})"
+    )
     _run_loop(store, engine, execution_id, trace=trace)
     store.close()
 
@@ -710,12 +751,12 @@ def cmd_continue(args):
     registry, state = _load_registry_for_execution(store, args.id)
     if state.finished:
         store.close()
-        console.print(f'[yellow]Execution {args.id} already finished[/]')
+        console.print(f"[yellow]Execution {args.id} already finished[/]")
         sys.exit(1)
 
-    trace = getattr(args, 'trace', False)
+    trace = getattr(args, "trace", False)
     engine = Engine(EngineConfig(workflows_registry=registry))
-    console.print(f'[bold]Continuing[/] [cyan]{args.id}[/]')
+    console.print(f"[bold]Continuing[/] [cyan]{args.id}[/]")
     _run_loop(store, engine, args.id, trace=trace)
     store.close()
 
@@ -726,22 +767,22 @@ def cmd_list(args):
     store.close()
 
     if not all_execs:
-        console.print('[dim]No executions yet.[/]')
+        console.print("[dim]No executions yet.[/]")
         return
 
     table = Table(show_lines=False)
-    table.add_column('execution_id', style='cyan')
-    table.add_column('workflow')
-    table.add_column('workflows', justify='right')
-    table.add_column('status')
+    table.add_column("execution_id", style="cyan")
+    table.add_column("workflow")
+    table.add_column("workflows", justify="right")
+    table.add_column("status")
 
     for exec_id, state, _created_at in all_execs:
         n_wf = len(state.workflows)
         root_name = state.workflows[state.root_workflow_id].name
         if state.finished:
-            status = Text('finished', style='dim')
+            status = Text("finished", style="dim")
         else:
-            status = Text('running', style='green')
+            status = Text("running", style="green")
         table.add_row(exec_id, root_name, str(n_wf), status)
 
     console.print(table)
@@ -751,154 +792,195 @@ def cmd_task(args):
     ts = TaskStore(TASKS_DB_PATH)
     action = args.task_action
 
-    if action == 'create':
+    if action == "create":
         labels = {}
         if args.label:
             for l in args.label:
-                k, _, v = l.partition('=')
+                k, _, v = l.partition("=")
                 labels[k] = v
         task = ts.create(
-            name=args.name, description=args.description or '',
-            labels=labels, color=args.color or '',
+            name=args.name,
+            description=args.description or "",
+            labels=labels,
+            color=args.color or "",
         )
-        console.print(f'[bold green]Created[/] [cyan]{task["task_id"]}[/] {task["name"]}')
+        console.print(
+            f"[bold green]Created[/] [cyan]{task['task_id']}[/] {task['name']}"
+        )
 
-    elif action == 'list':
+    elif action == "list":
         tasks = ts.list()
         if not tasks:
-            console.print('[dim]No tasks yet.[/]')
+            console.print("[dim]No tasks yet.[/]")
             ts.close()
             return
         table = Table(show_lines=False)
-        table.add_column('task_id', style='cyan')
-        table.add_column('name')
-        table.add_column('status')
-        table.add_column('description', style='dim')
-        table.add_column('labels', style='dim')
+        table.add_column("task_id", style="cyan")
+        table.add_column("name")
+        table.add_column("status")
+        table.add_column("description", style="dim")
+        table.add_column("labels", style="dim")
         for t in tasks:
-            labels_str = ', '.join(f'{k}={v}' for k, v in t['labels'].items()) if t['labels'] else ''
-            status_style = 'green' if t['status'] == 'pending' else 'dim'
-            status_text = t['status']
-            if t['needs_input']:
-                status_text += ' [amber]input[/]'
+            labels_str = (
+                ", ".join(f"{k}={v}" for k, v in t["labels"].items())
+                if t["labels"]
+                else ""
+            )
+            status_style = "green" if t["status"] == "pending" else "dim"
+            status_text = t["status"]
+            if t["needs_input"]:
+                status_text += " [amber]input[/]"
             table.add_row(
-                t['task_id'][:12], t['name'],
+                t["task_id"][:12],
+                t["name"],
                 Text(status_text, style=status_style),
-                t['description'][:40] if t['description'] else '',
+                t["description"][:40] if t["description"] else "",
                 labels_str,
             )
         console.print(table)
 
-    elif action == 'show':
+    elif action == "show":
         task = ts.find_by_prefix(args.id)
         for k, v in task.items():
-            console.print(f'  [bold]{k}[/]: {v}')
+            console.print(f"  [bold]{k}[/]: {v}")
 
-    elif action == 'update':
+    elif action == "update":
         kwargs = {}
         if args.name is not None:
-            kwargs['name'] = args.name
+            kwargs["name"] = args.name
         if args.description is not None:
-            kwargs['description'] = args.description
+            kwargs["description"] = args.description
         if args.color is not None:
-            kwargs['color'] = args.color
-        if getattr(args, 'status', None) is not None:
-            kwargs['status'] = args.status
+            kwargs["color"] = args.color
+        if getattr(args, "status", None) is not None:
+            kwargs["status"] = args.status
         if args.label:
             task = ts.find_by_prefix(args.id)
-            labels = dict(task['labels'])
+            labels = dict(task["labels"])
             for l in args.label:
-                k, _, v = l.partition('=')
-                if v == '':
+                k, _, v = l.partition("=")
+                if v == "":
                     labels.pop(k, None)
                 else:
                     labels[k] = v
-            kwargs['labels'] = labels
-        task = ts.update(ts.find_by_prefix(args.id)['task_id'], **kwargs)
-        console.print(f'[bold green]Updated[/] [cyan]{task["task_id"][:12]}[/] {task["name"]}')
+            kwargs["labels"] = labels
+        task = ts.update(ts.find_by_prefix(args.id)["task_id"], **kwargs)
+        console.print(
+            f"[bold green]Updated[/] [cyan]{task['task_id'][:12]}[/] {task['name']}"
+        )
 
-    elif action == 'delete':
+    elif action == "delete":
         task = ts.find_by_prefix(args.id)
-        ts.delete(task['task_id'])
-        console.print(f'[bold red]Deleted[/] [cyan]{task["task_id"][:12]}[/] {task["name"]}')
+        ts.delete(task["task_id"])
+        console.print(
+            f"[bold red]Deleted[/] [cyan]{task['task_id'][:12]}[/] {task['name']}"
+        )
 
     ts.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Durable workflow executor')
-    sub = parser.add_subparsers(dest='command', required=True)
+    parser = argparse.ArgumentParser(description="Durable workflow executor")
+    sub = parser.add_subparsers(dest="command", required=True)
 
-    p_start = sub.add_parser('start', help='Start a new workflow execution')
-    p_start.add_argument('target', help='file.py:workflow_name')
-    p_start.add_argument('args', nargs='*', help='JSON-encoded arguments')
-    p_start.add_argument('-w', '--workdir', default='.workspace',
-                         help='Working directory for the root workflow (default: .workspace)')
+    p_start = sub.add_parser("start", help="Start a new workflow execution")
+    p_start.add_argument("target", help="file.py:workflow_name")
+    p_start.add_argument("args", nargs="*", help="JSON-encoded arguments")
+    p_start.add_argument(
+        "-w",
+        "--workdir",
+        default=".workspace",
+        help="Working directory for the root workflow (default: .workspace)",
+    )
 
-    p_step = sub.add_parser('step', help='Advance all active workflows one tick')
-    p_step.add_argument('id', help='Execution ID')
+    p_step = sub.add_parser("step", help="Advance all active workflows one tick")
+    p_step.add_argument("id", help="Execution ID")
 
-    p_status = sub.add_parser('status', help='Show execution status')
-    p_status.add_argument('id', help='Execution ID')
+    p_status = sub.add_parser("status", help="Show execution status")
+    p_status.add_argument("id", help="Execution ID")
 
-    p_events = sub.add_parser('events', help='Show inbox/outbox events')
-    p_events.add_argument('id', help='Execution ID')
+    p_events = sub.add_parser("events", help="Show inbox/outbox events")
+    p_events.add_argument("id", help="Execution ID")
 
-    p_inspect = sub.add_parser('inspect', help='Inspect full execution state')
-    p_inspect.add_argument('id', help='Execution ID')
+    p_inspect = sub.add_parser("inspect", help="Inspect full execution state")
+    p_inspect.add_argument("id", help="Execution ID")
 
-    p_conv = sub.add_parser('conv', help='Show conversations for an execution')
-    p_conv.add_argument('id', help='Execution ID')
-    p_conv.add_argument('conversation_id', nargs='?', help='Conversation ID prefix (default: all)')
+    p_conv = sub.add_parser("conv", help="Show conversations for an execution")
+    p_conv.add_argument("id", help="Execution ID")
+    p_conv.add_argument(
+        "conversation_id", nargs="?", help="Conversation ID prefix (default: all)"
+    )
 
-    p_run = sub.add_parser('run', help='Start and run a workflow to completion (interactive)')
-    p_run.add_argument('target', help='file.py:workflow_name')
-    p_run.add_argument('args', nargs='*', help='JSON-encoded arguments')
-    p_run.add_argument('-w', '--workdir', default='.workspace',
-                       help='Working directory (default: .workspace)')
-    p_run.add_argument('--trace', action='store_true', help='Show all events (not just user-facing)')
+    p_run = sub.add_parser(
+        "run", help="Start and run a workflow to completion (interactive)"
+    )
+    p_run.add_argument("target", help="file.py:workflow_name")
+    p_run.add_argument("args", nargs="*", help="JSON-encoded arguments")
+    p_run.add_argument(
+        "-w",
+        "--workdir",
+        default=".workspace",
+        help="Working directory (default: .workspace)",
+    )
+    p_run.add_argument(
+        "--trace", action="store_true", help="Show all events (not just user-facing)"
+    )
 
-    p_continue = sub.add_parser('continue', help='Continue a paused execution to completion')
-    p_continue.add_argument('id', help='Execution ID')
-    p_continue.add_argument('--trace', action='store_true', help='Show all events')
+    p_continue = sub.add_parser(
+        "continue", help="Continue a paused execution to completion"
+    )
+    p_continue.add_argument("id", help="Execution ID")
+    p_continue.add_argument("--trace", action="store_true", help="Show all events")
 
-    sub.add_parser('list', help='List all executions')
+    sub.add_parser("list", help="List all executions")
 
-    p_task = sub.add_parser('task', help='Manage tasks')
-    task_sub = p_task.add_subparsers(dest='task_action', required=True)
+    p_task = sub.add_parser("task", help="Manage tasks")
+    task_sub = p_task.add_subparsers(dest="task_action", required=True)
 
-    p_tc = task_sub.add_parser('create', help='Create a task')
-    p_tc.add_argument('name', help='Task name')
-    p_tc.add_argument('-d', '--description', help='Description')
-    p_tc.add_argument('-l', '--label', action='append', help='Label as key=value')
-    p_tc.add_argument('--color', help='Color')
+    p_tc = task_sub.add_parser("create", help="Create a task")
+    p_tc.add_argument("name", help="Task name")
+    p_tc.add_argument("-d", "--description", help="Description")
+    p_tc.add_argument("-l", "--label", action="append", help="Label as key=value")
+    p_tc.add_argument("--color", help="Color")
 
-    task_sub.add_parser('list', help='List all tasks')
+    task_sub.add_parser("list", help="List all tasks")
 
-    p_ts = task_sub.add_parser('show', help='Show task details')
-    p_ts.add_argument('id', help='Task ID or prefix')
+    p_ts = task_sub.add_parser("show", help="Show task details")
+    p_ts.add_argument("id", help="Task ID or prefix")
 
-    p_tu = task_sub.add_parser('update', help='Update a task')
-    p_tu.add_argument('id', help='Task ID or prefix')
-    p_tu.add_argument('-n', '--name', help='New name')
-    p_tu.add_argument('-d', '--description', help='New description')
-    p_tu.add_argument('-s', '--status', choices=['pending', 'finished'], help='Status')
-    p_tu.add_argument('-l', '--label', action='append', help='Set label key=value (empty value removes)')
-    p_tu.add_argument('--color', help='Color')
+    p_tu = task_sub.add_parser("update", help="Update a task")
+    p_tu.add_argument("id", help="Task ID or prefix")
+    p_tu.add_argument("-n", "--name", help="New name")
+    p_tu.add_argument("-d", "--description", help="New description")
+    p_tu.add_argument("-s", "--status", choices=["pending", "finished"], help="Status")
+    p_tu.add_argument(
+        "-l",
+        "--label",
+        action="append",
+        help="Set label key=value (empty value removes)",
+    )
+    p_tu.add_argument("--color", help="Color")
 
-    p_td = task_sub.add_parser('delete', help='Delete a task')
-    p_td.add_argument('id', help='Task ID or prefix')
+    p_td = task_sub.add_parser("delete", help="Delete a task")
+    p_td.add_argument("id", help="Task ID or prefix")
 
-    p_web = sub.add_parser('web', help='Start the web UI')
-    p_web.add_argument('--port', type=int, default=8080, help='Port (default: 8080)')
-    p_web.add_argument('--host', default='0.0.0.0', help='Host (default: 0.0.0.0)')
+    p_web = sub.add_parser("web", help="Start the web UI")
+    p_web.add_argument("--port", type=int, default=8080, help="Port (default: 8080)")
+    p_web.add_argument("--host", default="0.0.0.0", help="Host (default: 0.0.0.0)")
 
     args = parser.parse_args()
     cmds = {
-        'start': cmd_start, 'step': cmd_step, 'status': cmd_status,
-        'events': cmd_events, 'inspect': cmd_inspect, 'conv': cmd_conv,
-        'run': cmd_run, 'continue': cmd_continue, 'list': cmd_list,
-        'task': cmd_task, 'web': cmd_web,
+        "start": cmd_start,
+        "step": cmd_step,
+        "status": cmd_status,
+        "events": cmd_events,
+        "inspect": cmd_inspect,
+        "conv": cmd_conv,
+        "run": cmd_run,
+        "continue": cmd_continue,
+        "list": cmd_list,
+        "task": cmd_task,
+        "web": cmd_web,
     }
     cmds[args.command](args)
 
@@ -906,10 +988,11 @@ def main():
 def cmd_web(args):
     """Start the web UI."""
     import uvicorn
-    os.environ['TURBO_DB'] = DB_PATH
-    console.print(f'[bold]Starting web UI[/] on http://{args.host}:{args.port}')
-    uvicorn.run('web.server:app', host=args.host, port=args.port, reload=False)
+
+    os.environ["TURBO_DB"] = DB_PATH
+    console.print(f"[bold]Starting web UI[/] on http://{args.host}:{args.port}")
+    uvicorn.run("web.server:app", host=args.host, port=args.port, reload=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -2,12 +2,16 @@ from pathlib import Path
 from workflows.isolation.host import HostIsolation
 from workflows.isolation.docker import DockerIsolation
 from workflows.isolation.base import scan_git_branches
-from workflows.event_handlers.base import resolve_wf, make_inbox_event, register_event_handler
+from workflows.event_handlers.base import (
+    resolve_wf,
+    make_inbox_event,
+    register_event_handler,
+)
 import workflows.events as ev
 
 
 def _make_isolation(iso_type, iso_config):
-    if iso_type == 'docker':
+    if iso_type == "docker":
         return iso_config or DockerIsolation()
     return HostIsolation()
 
@@ -22,11 +26,22 @@ class ShellRequestHandler:
         workdir = Path(wf.workdir)
         isolation = _make_isolation(payload.isolation_type, payload.isolation_config)
         from workflows.operations.shell_op import _private_envs
-        merged_env = {**(payload.public_env or {}), **_private_envs.pop(event.workflow_id, {})}
+
+        merged_env = {
+            **(payload.public_env or {}),
+            **_private_envs.pop(event.workflow_id, {}),
+        }
         result = isolation.run_shell(workdir, payload.command, env=merged_env or None)
         wf.branches = scan_git_branches(workdir)
         resolve_wf(state, event.workflow_id, result)
-        return [make_inbox_event(event, ev.ShellResult(
-            command=payload.command, exit_code=result.exit_code,
-            stdout=result.stdout, stderr=result.stderr,
-        ))]
+        return [
+            make_inbox_event(
+                event,
+                ev.ShellResult(
+                    command=payload.command,
+                    exit_code=result.exit_code,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                ),
+            )
+        ]

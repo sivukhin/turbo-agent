@@ -14,9 +14,9 @@ class ShellStreamStartOpHandler:
     @staticmethod
     def handle(val: ShellStreamStartOp, ctx: OpContext) -> None:
         if not ctx.wf.workdir:
-            raise RuntimeError(f'Workflow {ctx.workflow_id} has no workdir configured')
+            raise RuntimeError(f"Workflow {ctx.workflow_id} has no workdir configured")
         if val.isolation is None:
-            raise RuntimeError('ShellStreamStartOp requires an isolation instance')
+            raise RuntimeError("ShellStreamStartOp requires an isolation instance")
         iso_type, iso_config = _serialize_isolation(val.isolation)
         stream_id = new_id()
 
@@ -34,18 +34,22 @@ class ShellStreamStartOpHandler:
         if val.private_env:
             _stream_private_envs[stream_id] = val.private_env
 
-        ctx.wf.status = 'waiting'
-        ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
-            payload=ev.ShellStreamStartRequest(
-                stream_id=stream_id,
-                command=val.command,
-                isolation_type=iso_type,
-                isolation_config=iso_config,
-                public_env=val.public_env,
-            ),
-        ))
+        ctx.wf.status = "waiting"
+        ctx.new_events.append(
+            Event(
+                event_id=0,
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                category="outbox",
+                payload=ev.ShellStreamStartRequest(
+                    stream_id=stream_id,
+                    command=val.command,
+                    isolation_type=iso_type,
+                    isolation_config=iso_config,
+                    public_env=val.public_env,
+                ),
+            )
+        )
 
 
 @op_handler(ShellStreamNextOp)
@@ -54,9 +58,13 @@ class ShellStreamNextOpHandler:
     def handle(val: ShellStreamNextOp, ctx: OpContext) -> None:
         if val.private_env:
             _stream_private_envs[val.stream_id] = val.private_env
-        ctx.wf.status = 'waiting'
-        ctx.new_events.append(Event(
-            event_id=0, execution_id=ctx.execution_id,
-            workflow_id=ctx.workflow_id, category='outbox',
-            payload=ev.ShellStreamNextRequest(stream_id=val.stream_id),
-        ))
+        ctx.wf.status = "waiting"
+        ctx.new_events.append(
+            Event(
+                event_id=0,
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                category="outbox",
+                payload=ev.ShellStreamNextRequest(stream_id=val.stream_id),
+            )
+        )

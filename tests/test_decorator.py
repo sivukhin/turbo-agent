@@ -5,17 +5,20 @@ from workflows import workflow
 
 # ---- basic generator behavior ----
 
+
 @workflow
 def counter(n):
     for i in range(n):
         yield i
     return n
 
+
 @workflow
 def echo():
-    x = yield 'ready'
-    yield f'got {x}'
+    x = yield "ready"
+    yield f"got {x}"
     return x
+
 
 @workflow
 def expr_yield():
@@ -25,12 +28,14 @@ def expr_yield():
     yield c
     return c
 
+
 @workflow
 def for_loop_yield(n):
     for i in range(n):
         yield i
-    yield 'done'
+    yield "done"
     return n
+
 
 @workflow
 def if_else_yield(x):
@@ -38,7 +43,8 @@ def if_else_yield(x):
         yield x
     else:
         yield -x
-    yield 'end'
+    yield "end"
+
 
 @workflow
 def nested_expr():
@@ -59,8 +65,8 @@ class TestBasicYield:
 
     def test_send_value(self):
         g = echo()
-        assert next(g) == 'ready'
-        assert g.send(42) == 'got 42'
+        assert next(g) == "ready"
+        assert g.send(42) == "got 42"
         with pytest.raises(StopIteration) as exc:
             next(g)
         assert exc.value.value == 42
@@ -75,17 +81,17 @@ class TestBasicYield:
 
     def test_for_loop(self):
         g = for_loop_yield(3)
-        assert [next(g) for _ in range(4)] == [0, 1, 2, 'done']
+        assert [next(g) for _ in range(4)] == [0, 1, 2, "done"]
 
     def test_if_else_true_branch(self):
         g = if_else_yield(5)
         assert next(g) == 5
-        assert next(g) == 'end'
+        assert next(g) == "end"
 
     def test_if_else_false_branch(self):
         g = if_else_yield(-5)
         assert next(g) == 5  # -(-5)
-        assert next(g) == 'end'
+        assert next(g) == "end"
 
     def test_nested_expression_yields(self):
         g = nested_expr()
@@ -100,6 +106,7 @@ class TestBasicYield:
 
 # ---- checkpoint / resume ----
 
+
 class TestCheckpointResume:
     def test_checkpoint_has_locals(self):
         g = counter(5)
@@ -107,9 +114,9 @@ class TestCheckpointResume:
         next(g)  # yield 1
         cp = g.checkpoint()
         assert cp is not None
-        assert cp['yv'] == 1
-        assert 'i' in cp['locals']
-        assert cp['locals']['i'] == 1
+        assert cp["yv"] == 1
+        assert "i" in cp["locals"]
+        assert cp["locals"]["i"] == 1
 
     def test_save_and_resume(self):
         g = counter(5)
@@ -132,7 +139,7 @@ class TestCheckpointResume:
         data = g.save()
 
         g2 = echo.resume(data)
-        assert g2.send(99) == 'got 99'
+        assert g2.send(99) == "got 99"
 
     def test_resume_preserves_expression_stack(self):
         g = expr_yield()
@@ -152,7 +159,7 @@ class TestCheckpointResume:
         g2 = for_loop_yield.resume(data)
         assert next(g2) == 3
         assert next(g2) == 4
-        assert next(g2) == 'done'
+        assert next(g2) == "done"
 
     def test_checkpoint_is_picklable(self):
         g = counter(3)
@@ -166,16 +173,17 @@ class TestCheckpointResume:
 
     def test_resume_nested_expression(self):
         g = nested_expr()
-        next(g)      # yield 1
-        g.send(10)   # yield 2, stack has 10
+        next(g)  # yield 1
+        g.send(10)  # yield 2, stack has 10
         data = g.save()
 
         g2 = nested_expr.resume(data)
-        assert g2.send(20) == 3     # yield 3, stack has 10+20=30
-        assert g2.send(30) == 60    # result = 30 + 30 = 60
+        assert g2.send(20) == 3  # yield 3, stack has 10+20=30
+        assert g2.send(30) == 60  # result = 30 + 30 = 60
 
 
 # ---- cross-process simulation ----
+
 
 class TestCrossProcess:
     def test_serialize_deserialize_resume(self):
@@ -208,6 +216,7 @@ class TestCrossProcess:
 
 # ---- nested loops ----
 
+
 @workflow
 def nested_loops(n, m):
     results = []
@@ -217,6 +226,7 @@ def nested_loops(n, m):
             results.append(i * m + j)
     yield results
     return sum(results)
+
 
 @workflow
 def triple_nested(a, b, c):
@@ -228,6 +238,7 @@ def triple_nested(a, b, c):
                 yield total
     return total
 
+
 @workflow
 def nested_with_send(n):
     """Nested loop where inner loop uses sent values."""
@@ -237,6 +248,7 @@ def nested_with_send(n):
             x = yield total
             total += x
     return total
+
 
 @workflow
 def while_in_for(n):
@@ -278,10 +290,10 @@ class TestNestedLoops:
 
     def test_nested_with_send(self):
         g = nested_with_send(2)
-        assert next(g) == 0      # i=0,j=0, total=0
+        assert next(g) == 0  # i=0,j=0, total=0
         assert g.send(10) == 10  # i=0,j=1, total=10
-        assert g.send(5) == 15   # i=1,j=0, total=15
-        assert g.send(1) == 16   # i=1,j=1, total=16
+        assert g.send(5) == 15  # i=1,j=0, total=15
+        assert g.send(1) == 16  # i=1,j=1, total=16
         with pytest.raises(StopIteration) as exc:
             g.send(100)
         assert exc.value.value == 116
@@ -317,9 +329,9 @@ class TestNestedLoops:
 
     def test_nested_send_checkpoint(self):
         g = nested_with_send(3)
-        next(g)       # 0
-        g.send(10)    # 10
-        g.send(5)     # 15
+        next(g)  # 0
+        g.send(10)  # 10
+        g.send(5)  # 15
         data = g.save()
 
         g2 = nested_with_send.resume(data)
@@ -327,6 +339,7 @@ class TestNestedLoops:
 
 
 # ---- complex control flow ----
+
 
 @workflow
 def try_yield():
@@ -337,20 +350,22 @@ def try_yield():
         yield total
     return total
 
+
 @workflow
 def conditional_chain(n):
     """Multiple branches with yields."""
     result = 0
     for i in range(n):
         if i % 3 == 0:
-            x = yield f'fizz {i}'
+            x = yield f"fizz {i}"
             result += x
         elif i % 3 == 1:
-            x = yield f'buzz {i}'
+            x = yield f"buzz {i}"
             result += x * 2
         else:
-            yield f'skip {i}'
+            yield f"skip {i}"
     return result
+
 
 @workflow
 def break_loop(n):
@@ -358,8 +373,9 @@ def break_loop(n):
         if i == 3:
             break
         yield i
-    yield 'after break'
+    yield "after break"
     return i
+
 
 @workflow
 def continue_loop(n):
@@ -371,6 +387,7 @@ def continue_loop(n):
         collected.append(i)
     return collected
 
+
 @workflow
 def accumulate_with_reset(n):
     """Accumulator that resets when it exceeds a threshold."""
@@ -379,7 +396,7 @@ def accumulate_with_reset(n):
     for i in range(n):
         total += i
         if total > 10:
-            yield f'reset at {total}'
+            yield f"reset at {total}"
             total = 0
             resets += 1
         else:
@@ -390,12 +407,12 @@ def accumulate_with_reset(n):
 class TestComplexControlFlow:
     def test_conditional_chain(self):
         g = conditional_chain(6)
-        assert next(g) == 'fizz 0'
-        assert g.send(1) == 'buzz 1'
-        assert g.send(2) == 'skip 2'
-        assert next(g) == 'fizz 3'
-        assert g.send(3) == 'buzz 4'
-        assert g.send(4) == 'skip 5'
+        assert next(g) == "fizz 0"
+        assert g.send(1) == "buzz 1"
+        assert g.send(2) == "skip 2"
+        assert next(g) == "fizz 3"
+        assert g.send(3) == "buzz 4"
+        assert g.send(4) == "skip 5"
         with pytest.raises(StopIteration) as exc:
             next(g)
         # result = 1 + 2*2 + 3 + 4*2 = 1 + 4 + 3 + 8 = 16
@@ -403,7 +420,7 @@ class TestComplexControlFlow:
 
     def test_break_loop(self):
         g = break_loop(10)
-        assert list(g) == [0, 1, 2, 'after break']
+        assert list(g) == [0, 1, 2, "after break"]
 
     def test_continue_loop(self):
         g = continue_loop(6)
@@ -414,18 +431,18 @@ class TestComplexControlFlow:
         g = accumulate_with_reset(10)
         vals = list(g)
         # 0,1,3,6,10 then reset at 15 → 0+5=5,11 reset → 0+7=7,15 reset → 0+9=9
-        assert 'reset at' in str(vals)
+        assert "reset at" in str(vals)
 
     def test_conditional_chain_checkpoint(self):
         g = conditional_chain(9)
-        next(g)      # fizz 0
-        g.send(10)   # buzz 1 (x=10, result=10)
-        g.send(5)    # skip 2 (x=5, result=10+5*2=20)
+        next(g)  # fizz 0
+        g.send(10)  # buzz 1 (x=10, result=10)
+        g.send(5)  # skip 2 (x=5, result=10+5*2=20)
         data = g.save()
 
         g2 = conditional_chain.resume(data)
         val = next(g2)
-        assert val == 'fizz 3'
+        assert val == "fizz 3"
 
     def test_break_loop_return(self):
         g = break_loop(10)

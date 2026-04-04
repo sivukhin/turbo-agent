@@ -9,21 +9,27 @@ from workflows.isolation.base import ShellResult
 class DockerIsolation:
     """Runs commands in Docker containers with the workdir bind-mounted."""
 
-    image: str = 'alpine:latest'
-    network: str = 'none'  # 'none' | 'host'
+    image: str = "alpine:latest"
+    network: str = "none"  # 'none' | 'host'
 
-    def run_shell(self, workdir: Path, command: str, env: dict | None = None) -> ShellResult:
+    def run_shell(
+        self, workdir: Path, command: str, env: dict | None = None
+    ) -> ShellResult:
         uid, gid = os.getuid(), os.getgid()
         cmd = [
-            'docker', 'run', '--rm',
-            f'--network={self.network}',
-            f'--user={uid}:{gid}',
-            '-v', f'{workdir.resolve()}:/workspace',
-            '-w', '/workspace',
+            "docker",
+            "run",
+            "--rm",
+            f"--network={self.network}",
+            f"--user={uid}:{gid}",
+            "-v",
+            f"{workdir.resolve()}:/workspace",
+            "-w",
+            "/workspace",
         ]
         for k, v in (env or {}).items():
-            cmd.extend(['-e', f'{k}={v}'])
-        cmd.extend([self.image, 'sh', '-c', command])
+            cmd.extend(["-e", f"{k}={v}"])
+        cmd.extend([self.image, "sh", "-c", command])
         result = subprocess.run(cmd, capture_output=True, text=True)
         return ShellResult(
             exit_code=result.returncode,

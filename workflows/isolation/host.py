@@ -8,9 +8,11 @@ from workflows.isolation.base import ShellResult
 class HostIsolation:
     """Runs commands directly on the host in the given workdir."""
 
-    def run_shell(self, workdir: Path, command: str, env: dict | None = None) -> ShellResult:
+    def run_shell(
+        self, workdir: Path, command: str, env: dict | None = None
+    ) -> ShellResult:
         result = subprocess.run(
-            ['sh', '-c', command],
+            ["sh", "-c", command],
             cwd=str(workdir),
             capture_output=True,
             text=True,
